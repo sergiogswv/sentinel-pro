@@ -64,13 +64,7 @@ fn ejecutar_con_fallback(
     fallback: Option<&ModelConfig>,
     stats: Arc<Mutex<SentinelStats>>,
 ) -> anyhow::Result<String> {
-    match consultar_ia(
-        prompt.clone(),
-        &principal.api_key,
-        &principal.url,
-        &principal.name,
-        Arc::clone(&stats),
-    ) {
+    match consultar_ia(prompt.clone(), principal, Arc::clone(&stats)) {
         Ok(res) => Ok(res),
         Err(e) => {
             if let Some(fb) = fallback {
@@ -82,7 +76,7 @@ fn ejecutar_con_fallback(
                     )
                     .yellow()
                 );
-                consultar_ia(prompt, &fb.api_key, &fb.url, &fb.name, stats)
+                consultar_ia(prompt, fb, stats)
             } else {
                 Err(e)
             }
@@ -92,21 +86,36 @@ fn ejecutar_con_fallback(
 
 pub fn consultar_ia(
     prompt: String,
-    api_key: &str,
-    base_url: &str,
-    model_name: &str,
+    model: &ModelConfig,
     stats: Arc<Mutex<SentinelStats>>,
 ) -> anyhow::Result<String> {
     let client = Client::new();
 
     let prompt_len = prompt.len();
-    let resultado = if base_url.contains("interactions") {
-        consultar_gemini_interactions(&client, prompt, api_key, base_url, model_name)
-    } else if base_url.contains("googleapis.com") {
-        consultar_gemini_content(&client, prompt, api_key, base_url, model_name)
+    let resultado = if !model.provider.is_empty() {
+        match model.provider.as_str() {
+            "gemini" => {
+                consultar_gemini_content(&client, prompt, &model.api_key, &model.url, &model.name)
+            }
+            "interactions" => consultar_gemini_interactions(
+                &client,
+                prompt,
+                &model.api_key,
+                &model.url,
+                &model.name,
+            ),
+            "ollama" => consultar_ollama(&client, prompt, &model.url, &model.name),
+            "lm-studio" | "openai" => {
+                consultar_openai_compat(&client, prompt, &model.api_key, &model.url, &model.name)
+            }
+            _ => consultar_anthropic(&client, prompt, &model.api_key, &model.url, &model.name),
+        }
+    } else if model.url.contains("interactions") {
+        consultar_gemini_interactions(&client, prompt, &model.api_key, &model.url, &model.name)
+    } else if model.url.contains("googleapis.com") {
+        consultar_gemini_content(&client, prompt, &model.api_key, &model.url, &model.name)
     } else {
-        // Por defecto asumimos estructura Anthropic (Claude)
-        consultar_anthropic(&client, prompt, api_key, base_url, model_name)
+        consultar_anthropic(&client, prompt, &model.api_key, &model.url, &model.name)
     };
 
     if let Ok(ref res) = resultado {
@@ -254,4 +263,203 @@ fn consultar_anthropic(
         .as_str()
         .map(|s| s.to_string())
         .ok_or_else(|| anyhow::anyhow!("Estructura de Anthropic inesperada. Body: {}", body_text))
+}
+
+fn consultar_ollama(
+    client: &Client,
+    prompt: String,
+    base_url: &str,
+    model_name: &str,
+) -> anyhow::Result<String> {
+    let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
+
+    let response = client
+        .post(&url)
+        .json(&json!({
+            "model": model_name,
+            "prompt": prompt,
+            "stream": false
+        }))
+        .send()?;
+
+    let status = response.status();
+    let body_text = response.text()?;
+
+    if !status.is_success() {
+        return Err(anyhow::anyhow!(
+            "Error de API Ollama (Status {}): {}",
+            status,
+            body_text
+        ));
+    }
+
+    let body: serde_json::Value = serde_json::from_str(&body_text)?;
+    body["response"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow::anyhow!("Estructura de Ollama inesperada. Body: {}", body_text))
+}
+
+fn consultar_openai_compat(
+    client: &Client,
+    prompt: String,
+    api_key: &str,
+    base_url: &str,
+    model_name: &str,
+) -> anyhow::Result<String> {
+    let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&json!({
+            "model": model_name,
+            "messages": [{"role": "user", "content": prompt}]
+        }))
+        .send()?;
+
+    let status = response.status();
+    let body_text = response.text()?;
+
+    if !status.is_success() {
+        return Err(anyhow::anyhow!(
+            "Error de API OpenAI-Compat/LM-Studio (Status {}): {}",
+            status,
+            body_text
+        ));
+    }
+
+    let body: serde_json::Value = serde_json::from_str(&body_text)?;
+    body["choices"][0]["message"]["content"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Estructura de OpenAI-Compat inesperada. Body: {}",
+                body_text
+            )
+        })
+}
+
+pub fn obtener_embeddings(
+    textos: Vec<String>,
+    model: &ModelConfig,
+) -> anyhow::Result<Vec<Vec<f32>>> {
+    let client = Client::new();
+
+    match model.provider.as_str() {
+        "gemini" => {
+            obtener_embeddings_gemini(&client, textos, &model.api_key, &model.url, &model.name)
+        }
+        "ollama" => obtener_embeddings_ollama(&client, textos, &model.url, &model.name),
+        "openai" | "lm-studio" => {
+            obtener_embeddings_openai(&client, textos, &model.api_key, &model.url, &model.name)
+        }
+        _ => Err(anyhow::anyhow!(
+            "El proveedor {} no soporta embeddings actualmente",
+            model.provider
+        )),
+    }
+}
+
+fn obtener_embeddings_gemini(
+    client: &Client,
+    textos: Vec<String>,
+    api_key: &str,
+    base_url: &str,
+    model_name: &str,
+) -> anyhow::Result<Vec<Vec<f32>>> {
+    let url = format!(
+        "{}/v1beta/models/{}:batchEmbedContents",
+        base_url.trim_end_matches('/'),
+        model_name
+    );
+
+    let requests: Vec<serde_json::Value> = textos.into_iter().map(|t| {
+        json!({ "model": format!("models/{}", model_name), "content": { "parts": [{ "text": t }] } })
+    }).collect();
+
+    let response = client
+        .post(&url)
+        .header("x-goog-api-key", api_key)
+        .json(&json!({ "requests": requests }))
+        .send()?;
+
+    let body: serde_json::Value = response.json()?;
+    let embeddings = body["embeddings"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("Respuesta de Gemini Embeddings inesperada: {}", body))?
+        .iter()
+        .map(|e| {
+            e["values"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap() as f32)
+                .collect()
+        })
+        .collect();
+
+    Ok(embeddings)
+}
+
+fn obtener_embeddings_ollama(
+    client: &Client,
+    textos: Vec<String>,
+    base_url: &str,
+    model_name: &str,
+) -> anyhow::Result<Vec<Vec<f32>>> {
+    let url = format!("{}/api/embed", base_url.trim_end_matches('/'));
+    let mut results = Vec::new();
+
+    for texto in textos {
+        let response = client
+            .post(&url)
+            .json(&json!({ "model": model_name, "input": texto }))
+            .send()?;
+
+        let body: serde_json::Value = response.json()?;
+        let embedding = body["embeddings"][0]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("Respuesta de Ollama Embeddings inesperada"))?
+            .iter()
+            .map(|v| v.as_f64().unwrap() as f32)
+            .collect();
+        results.push(embedding);
+    }
+
+    Ok(results)
+}
+
+fn obtener_embeddings_openai(
+    client: &Client,
+    textos: Vec<String>,
+    api_key: &str,
+    base_url: &str,
+    model_name: &str,
+) -> anyhow::Result<Vec<Vec<f32>>> {
+    let url = format!("{}/v1/embeddings", base_url.trim_end_matches('/'));
+
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&json!({ "model": model_name, "input": textos }))
+        .send()?;
+
+    let body: serde_json::Value = response.json()?;
+    let embeddings = body["data"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("Respuesta de OpenAI Embeddings inesperada"))?
+        .iter()
+        .map(|d| {
+            d["embedding"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap() as f32)
+                .collect()
+        })
+        .collect();
+
+    Ok(embeddings)
 }

@@ -1,15 +1,15 @@
-# Sentinel 🛡️
+# Sentinel Pro 🛡️✨
 
 <p align="center">
   <img src="./public/sentinel.jpg" alt="Sentinel Logo" width="100%"/>
 </p>
 
 <p align="center">
-  <strong>Elite Productivity Assistant: Multi-Model AI Orchestrator for Architecture Auditing, Autonomous Testing, and Development Observability.</strong>
+  <strong>The Ultimate AI-Powered Code Monitor & Development Suite.</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.4.3-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-5.0.0--pro-purple.svg" alt="Version">
   <img src="https://img.shields.io/badge/rust-2024-orange.svg" alt="Rust">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
 </p>
@@ -20,17 +20,18 @@
 
 Real-time monitoring tool written in **Rust** that analyzes code changes using **multiple AI providers** (Claude, Gemini, etc.) and manages workflow with Git. Designed for **NestJS/TypeScript** projects as an intelligent development assistant.
 
-### ✨ Key Features
+### ✨ Key Features (Pro Edition)
 
-- 🤖 **Automatic AI Analysis** - Multi-model support (Claude, Gemini) with fallback
+- 🤖 **Advanced AI Orchestration** - Native support for **Ollama**, **LM Studio**, Claude, and Gemini
+- 🏗️ **Framework Rule Engine** - YAML-based architecture validation (Pre-AI)
+- 🧠 **Local Knowledge Base** - Code indexing and vector store for deep context
+- ⚡ **Pro CLI Commands** - `analyze`, `generate`, `refactor`, `fix`, `chat`
 - 💾 **Smart Caching** - Reduces API costs up to 70%
 - 📊 **Real-time Metrics** - Tracking bugs, costs, tokens, and productivity
-- 🧪 **Automatic Tests** - Runs Jest with real-time output
-- 🎯 **Parent File Detection** - Automatically finds parent modules for comprehensive testing
+- 🧪 **Autonomous Testing** - AI-assisted test generation and execution
+- 🎯 **Parent File Detection** - Automatically finds parent modules
 - 📚 **Auto-documentation** - Generates technical manuals automatically
-- 📈 **Daily Reports** - Intelligent commit summaries
-- 🔒 **Security** - Automatic API key protection in `.gitignore`
-- ⚙️ **Flexible Configuration** - Per-project, no environment variables
+- 🔒 **Security Pro** - Local LLM support for 100% offline privacy
 
 ---
 
@@ -70,8 +71,21 @@ Once started, Sentinel responds to these commands:
 | `r` | Generate daily report |
 | `m` | View metrics (bugs, costs, tokens) |
 | `l` | Clear cache |
+| `t` | Ask AI for test suggestions |
 | `h` | Show help |
 | `x` | Reset configuration |
+
+### Pro CLI Commands
+
+Access advanced features using the `pro` sub-command:
+
+```bash
+sentinel pro analyze <file>   # Deep architectural analysis
+sentinel pro generate <file>  # Generate code from local context
+sentinel pro refactor <file>  # Proactive refactoring suggestions
+sentinel pro fix <file>       # Intelligent bug fixing
+sentinel pro chat             # Interactive codebase chat
+```
 
 💡 **Tip:** On startup, Sentinel automatically displays the command list.
 
@@ -177,12 +191,11 @@ Contributions are welcome! Please:
 Phase 1: ✅ Completed - Monitoring and basic analysis
 Phase 2: ✅ Completed - Productivity and documentation
 Phase 3: ✅ Completed - Optimization and stability
-Phase 4: ✅ Completed - Multi-model AI & Parent file detection (v4.2.0)
-Phase 5: 🚧 Planned - Multi-platform support (frameworks & languages)
-  → Sub-phase: 🌐 New AI Models (OpenAI, Mistral, Local models)
-Phase 6: 📅 Planned - Security (SecOps)
-Phase 7: 📅 Planned - PR Review Automation (Elite)
-Phase 8: 📅 Planned - Enterprise & scalability
+Phase 4: ✅ Completed - Multi-model AI & Parent file detection (v4.5.0)
+Phase 5: ✅ Completed - CLI Dispatcher, Local LLMs & Rules Engine (v5.0.0-pro)
+Phase 6: ✅ Completed - Local Knowledge Base & Vector Search
+Phase 7: 🚀 Starting - AI Multi-Agent System (Architect, QA, Dev)
+Phase 8: 📅 Planned - SecOps & Automated Code Reviews
 ```
 
 [View complete roadmap →](docs/roadmap.md)

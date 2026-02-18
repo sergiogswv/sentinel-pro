@@ -91,9 +91,7 @@ pub fn detectar_framework_con_ia(
     // Primera consulta
     let respuesta = consultar_ia(
         prompt_inicial,
-        &config.primary_model.api_key,
-        &config.primary_model.url,
-        &config.primary_model.name,
+        &config.primary_model,
         Arc::new(Mutex::new(SentinelStats::default())),
     )?;
 
@@ -136,9 +134,7 @@ pub fn detectar_framework_con_ia(
 
             let respuesta_final = consultar_ia(
                 prompt_con_contenido,
-                &config.primary_model.api_key,
-                &config.primary_model.url,
-                &config.primary_model.name,
+                &config.primary_model,
                 Arc::new(Mutex::new(SentinelStats::default())),
             )?;
 

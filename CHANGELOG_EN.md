@@ -4,6 +4,53 @@ All notable changes to Sentinel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [5.0.0-pro.alpha.2] - 2025-02-17
+
+### 🧠 Knowledge Base & Vector Store (Stage 2)
+
+#### Code Indexing (Tree-sitter)
+- **AST-Based Indexing**: Native integration with `tree-sitter` for deep code analysis.
+- **Symbol Extraction**: Automatically identifies functions, classes, interfaces, and imports.
+- **Recursive Project Scan**: New `index_all_project` capability for initial codebase ingestion.
+
+#### Vector Database (Qdrant)
+- **Semantic Search**: Integrated Qdrant as the primary vector store for code embeddings.
+- **Metadata-Rich Payloads**: Vectors stored with file path, line ranges, and symbol content.
+- **Optimized Schema**: 768-D vector configuration with Cosine distance for high-precision retrieval.
+
+#### Intelligence & Automation
+- **Background Indexing**: New `KBManager` handles incremental indexing on a separate thread via Tokio.
+- **RAG Foundation**: Implemented `ContextBuilder` to retrieve semantically relevant code for AI prompts.
+- **Embedded Generation**: Multi-provider support for generating code embeddings (Gemini, OpenAI, Ollama).
+
+---
+
+## [5.0.0-pro.alpha.1] - 2025-02-17
+
+### 🚀 Sentinel Pro Launch (Stage 1)
+
+#### CLI & Core
+- **New Pro CLI Dispatcher**: Completely redesigned command-line interface using `clap`.
+  - Nested subcommands support (`sentinel pro <cmd>`).
+  - Native Windows & Linux compatibility enhancements.
+- **Pro Command Stubs**: Initial implementation of advanced tools:
+  - `sentinel pro analyze`, `generate`, `refactor`, `fix`, `chat`.
+- **UI/UX Pro**: Integrated `indicatif` for progress spinners and visual feedback.
+
+#### AI & Local LLMs
+- **Local AI Support**: Native integration with **Ollama** and **LM Studio**.
+  - Run Sentinel 100% offline for maximum privacy.
+- **Improved Provider Handlers**: Unified `ModelConfig` with provider detection.
+
+#### Rules Engine
+- **Framework Rule Engine**: Introduced YAML-based rule definitions (`.sentinel/rules.yaml`).
+  - Pre-AI static validation of architectural patterns.
+
+#### Configuration
+- **Expanded Config Schema**: Added sections for `features`, `local_llm`, `ml`, and `knowledge_base`.
+- **Pro Init Wizard**: Updated interactive setup for local providers and Pro features.
+
+---
 
 ## [4.5.0] - 2025-02-05
 

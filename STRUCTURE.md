@@ -8,21 +8,27 @@ The project has been refactored into specialized modules to improve maintainabil
 
 ```
 src/
-├── main.rs        # Entry point and main watcher loop
-├── ai/            # AI integration module (modularized v4.4.3)
+├── main.rs        # Entry point and orchestration
+├── ai/            # AI integration (modularized v4.4.3)
+│   ├── mod.rs           # Definition and re-exports
+│   ├── client.rs        # AI Clients (Anthropic, Gemini, Ollama, OpenAI)
+│   └── ...
+├── kb/            # Knowledge Base Module (Stage 2)
 │   ├── mod.rs           # Module definition and re-exports
-│   ├── cache.rs         # Response caching system
-│   ├── client.rs        # Communication with AI APIs
-│   ├── framework.rs     # Framework detection with AI
-│   ├── analysis.rs      # Architecture analysis
-│   └── utils.rs         # Utilities (extract/remove code)
-├── config.rs      # Configuration management (.sentinelrc.toml)
+│   ├── indexer.rs       # Code indexing with Tree-sitter
+│   ├── vector_db.rs     # Vector database client (Qdrant)
+│   ├── context.rs       # Semantic context builder
+│   └── manager.rs       # Background indexing orchestrator
+├── commands/      # CLI Command handlers (v5.0.0 Pro)
+│   ├── mod.rs           # Cli & Commands definitions
+│   ├── monitor.rs       # Monitor mode logic
+│   └── pro.rs           # Pro command implementations
+├── rules/         # Architecture Rules Engine (v5.0.0 Pro)
+│   ├── mod.rs           # YAML structure definitions
+│   └── engine.rs        # Static validation engine
+├── config.rs      # Pro configuration management
 ├── docs.rs        # Documentation generation
-├── files.rs       # Parent file detection utilities
-├── git.rs         # Git operations
-├── stats.rs       # Statistics and productivity metrics
-├── tests.rs       # Test execution and diagnostics
-└── ui.rs          # User interface and project validation
+└── ...
 ```
 
 ## Module Descriptions
@@ -202,6 +208,56 @@ The AI module has been refactored into specialized submodules for better maintai
 - `crate::config` - For project configuration
 - `serde` - JSON serialization/deserialization
 - `colored` - Colorful console output
+
+---
+
+### `kb/` (v5.0.0 Pro - Stage 2)
+**Responsibility**: Local Knowledge Base Management
+
+Module in charge of indexing source code and providing semantic context to the AI.
+
+#### `kb/indexer.rs`
+**Responsibility**: Syntactic analysis and symbol extraction
+- Uses `tree-sitter` to parse TypeScript/JavaScript code.
+- Extracts classes, functions, methods, and interfaces.
+- Generates syntactic summaries for indexing.
+
+#### `kb/vector_db.rs`
+**Responsibility**: Vector database management (Qdrant)
+- Initializes collections in Qdrant.
+- Stores code embeddings with metadata (path, lines, content).
+- Performs vector similarity searches.
+
+#### `kb/context.rs`
+**Responsibility**: Semantic context construction
+- Generates embeddings for user queries or code changes.
+- Retrieves the most relevant code snippets from the Vector DB.
+- Formats the context for injection into AI prompts.
+
+#### `kb/manager.rs`
+**Responsibility**: Orchestration and background processes
+- Manages the initial indexing of the entire project.
+- Processes incremental updates in the background (via Tokio mpsc).
+- Coordinates batch embedding generation to optimize API usage.
+
+---
+
+### `rules/` (v5.0.0 Pro)
+**Responsibility**: YAML-based architecture rules engine
+
+**Modules**:
+- `rules/mod.rs`: Data structures for `FrameworkDefinition` and `FrameworkRule`.
+- `rules/engine.rs`: Implements `RuleEngine` for pre-AI static validation.
+
+---
+
+### `commands/` (v5.0.0 Pro)
+**Responsibility**: CLI dispatcher and specialized commands
+
+**Modules**:
+- `commands/mod.rs`: Central parser using `clap`.
+- `commands/monitor.rs`: Real-time monitoring orchestration.
+- `commands/pro.rs`: Advanced task implementations (analyze, generate, refactor, chat).
 
 ---
 

@@ -22,6 +22,42 @@ pub struct ModelConfig {
     pub name: String,
     pub url: String,
     pub api_key: String,
+    #[serde(default)]
+    pub provider: String, // "anthropic", "gemini", "ollama", "lm-studio"
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FeaturesConfig {
+    #[serde(default = "default_true")]
+    pub enable_ml: bool,
+    #[serde(default = "default_true")]
+    pub enable_agents: bool,
+    #[serde(default = "default_true")]
+    pub enable_knowledge_base: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LocalLlmConfig {
+    pub provider: String,
+    pub model_path: String,
+    pub api_port: u16,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MlConfig {
+    pub models_path: String,
+    pub embeddings_model: String,
+    pub bug_predictor_model: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct KnowledgeBaseConfig {
+    pub vector_db_url: String,
+    pub index_on_start: bool,
 }
 
 impl Default for ModelConfig {
@@ -30,6 +66,7 @@ impl Default for ModelConfig {
             name: "claude-opus-4-5-20251101".to_string(),
             url: "https://api.anthropic.com".to_string(),
             api_key: "".to_string(),
+            provider: "anthropic".to_string(),
         }
     }
 }
@@ -43,7 +80,7 @@ pub struct SentinelConfig {
     pub test_command: String,
     pub architecture_rules: Vec<String>,
     pub file_extensions: Vec<String>, // Extensiones de archivo a monitorear
-    pub code_language: String, // Lenguaje para bloques de código (detectado por IA)
+    pub code_language: String,        // Lenguaje para bloques de código (detectado por IA)
     pub parent_patterns: Vec<String>, // Patrones de archivos padre específicos del framework
     pub test_patterns: Vec<String>, // Patrones de ubicación de tests (usa {name} como placeholder)
     pub ignore_patterns: Vec<String>,
@@ -52,9 +89,19 @@ pub struct SentinelConfig {
     pub use_cache: bool,
     // Testing framework detection
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub testing_framework: Option<String>, // Framework de testing principal (ej: "Jest", "Pytest")
+    pub testing_framework: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub testing_status: Option<String>, // Estado: "valid", "incomplete", "missing"
+    pub testing_status: Option<String>,
+
+    // --- Pro Features ---
+    #[serde(default)]
+    pub features: Option<FeaturesConfig>,
+    #[serde(default)]
+    pub local_llm: Option<LocalLlmConfig>,
+    #[serde(default)]
+    pub ml: Option<MlConfig>,
+    #[serde(default)]
+    pub knowledge_base: Option<KnowledgeBaseConfig>,
 }
 
 impl SentinelConfig {
@@ -72,6 +119,7 @@ impl SentinelConfig {
             name: "claude-opus-4-5-20251101".to_string(),
             url: "https://api.anthropic.com".to_string(),
             api_key: "".to_string(),
+            provider: "anthropic".to_string(),
         };
 
         Self {
@@ -100,6 +148,25 @@ impl SentinelConfig {
             use_cache: true,
             testing_framework: None,
             testing_status: None,
+            features: Some(FeaturesConfig {
+                enable_ml: true,
+                enable_agents: true,
+                enable_knowledge_base: true,
+            }),
+            local_llm: Some(LocalLlmConfig {
+                provider: "ollama".to_string(),
+                model_path: "~/.ollama/models".to_string(),
+                api_port: 11434,
+            }),
+            ml: Some(MlConfig {
+                models_path: ".sentinel/models".to_string(),
+                embeddings_model: "codebert".to_string(),
+                bug_predictor_model: "bug-predictor-v1".to_string(),
+            }),
+            knowledge_base: Some(KnowledgeBaseConfig {
+                vector_db_url: "http://localhost:6333".to_string(),
+                index_on_start: true,
+            }),
         }
     }
 
@@ -168,7 +235,11 @@ impl SentinelConfig {
             if config.version != SENTINEL_VERSION {
                 println!(
                     "{}",
-                    format!("   🔄 Migrando configuración de versión {} a {}...", config.version, SENTINEL_VERSION).yellow()
+                    format!(
+                        "   🔄 Migrando configuración de versión {} a {}...",
+                        config.version, SENTINEL_VERSION
+                    )
+                    .yellow()
                 );
                 config = Self::migrar_config(config, path);
                 // Guardar la configuración migrada
@@ -194,7 +265,10 @@ impl SentinelConfig {
         }
 
         if let Ok(old_config) = toml::from_str::<SentinelConfigV1>(&content) {
-            println!("{}", "   🔄 Detectada configuración antigua, migrando...".yellow());
+            println!(
+                "{}",
+                "   🔄 Detectada configuración antigua, migrando...".yellow()
+            );
 
             // Crear nueva configuración con valores migrados o defaults
             let nombre = old_config.project_name.unwrap_or_else(|| {
@@ -204,13 +278,13 @@ impl SentinelConfig {
                     .to_string()
             });
 
-            let gestor = old_config.manager.unwrap_or_else(|| {
-                Self::detectar_gestor(path)
-            });
+            let gestor = old_config
+                .manager
+                .unwrap_or_else(|| Self::detectar_gestor(path));
 
-            let framework = old_config.framework.unwrap_or_else(|| {
-                "JavaScript/TypeScript".to_string()
-            });
+            let framework = old_config
+                .framework
+                .unwrap_or_else(|| "JavaScript/TypeScript".to_string());
 
             let rules = old_config.architecture_rules.unwrap_or_else(|| {
                 vec![
@@ -220,9 +294,9 @@ impl SentinelConfig {
                 ]
             });
 
-            let extensions = old_config.file_extensions.unwrap_or_else(|| {
-                vec!["js".to_string(), "ts".to_string()]
-            });
+            let extensions = old_config
+                .file_extensions
+                .unwrap_or_else(|| vec!["js".to_string(), "ts".to_string()]);
 
             // Inferir code_language basado en extensiones (fallback)
             let code_language = if extensions.contains(&"ts".to_string()) {
@@ -257,7 +331,16 @@ impl SentinelConfig {
                 vec!["{name}.test.{ext}".to_string()]
             };
 
-            let mut new_config = Self::default(nombre, gestor, framework, rules, extensions, code_language, parent_patterns, test_patterns);
+            let mut new_config = Self::default(
+                nombre,
+                gestor,
+                framework,
+                rules,
+                extensions,
+                code_language,
+                parent_patterns,
+                test_patterns,
+            );
 
             // Preservar valores sensibles de la config antigua
             if let Some(model) = old_config.primary_model {
@@ -411,9 +494,10 @@ impl SentinelConfig {
         }
 
         // 2. Validar que tenga una extensión permitida
-        let tiene_extension_valida = self.file_extensions.iter().any(|ext| {
-            path_str.ends_with(&format!(".{}", ext))
-        });
+        let tiene_extension_valida = self
+            .file_extensions
+            .iter()
+            .any(|ext| path_str.ends_with(&format!(".{}", ext)));
 
         if !tiene_extension_valida {
             return true;

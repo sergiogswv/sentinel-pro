@@ -17,6 +17,6 @@ pub mod utils;
 // Re-exports públicos
 pub use analysis::analizar_arquitectura;
 pub use cache::limpiar_cache;
-pub use client::{consultar_ia_dinamico, TaskType};
+pub use client::{TaskType, consultar_ia_dinamico, obtener_embeddings};
 pub use framework::{detectar_framework_con_ia, listar_modelos_gemini};
-pub use testing::{detectar_testing_framework, obtener_sugerencias_complementarias, TestingStatus};
+pub use testing::{TestingStatus, detectar_testing_framework, obtener_sugerencias_complementarias};

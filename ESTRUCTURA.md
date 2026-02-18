@@ -16,6 +16,12 @@ src/
 │   ├── framework.rs     # Detección de frameworks con IA
 │   ├── analysis.rs      # Análisis de arquitectura
 │   └── utils.rs         # Utilidades (extraer/eliminar código)
+├── kb/            # Módulo de Knowledge Base (Etapa 2)
+│   ├── mod.rs           # Definición del módulo y re-exports
+│   ├── indexer.rs       # Indexación de código con Tree-sitter
+│   ├── vector_db.rs     # Cliente de base de datos vectorial (Qdrant)
+│   ├── context.rs       # Builder de contexto semántico
+│   └── manager.rs       # Orquestador de indexación en background
 ├── config.rs      # Gestión de configuración (.sentinelrc.toml)
 ├── docs.rs        # Generación de documentación
 ├── files.rs       # Utilidades de detección de archivos padres
@@ -74,18 +80,13 @@ El módulo AI ha sido refactorizado en submódulos especializados para mejor man
 **Responsabilidad**: Comunicación con APIs de proveedores de IA
 
 **Funciones públicas**:
-- `consultar_ia_dinamico(prompt, task_type, config, stats, project_path)` - Punto de entrada con caché y fallback
-- `consultar_ia(prompt, api_key, base_url, model_name, stats)` - Cliente base multi-proveedor
-- `TaskType` enum - Light (commits, docs) vs Deep (arquitectura, debug)
+- `consultar_ia_dinamico(...)` - Punto de entrada con caché y fallback
+- `consultar_ia(...)` - Cliente unificado para **Anthropic**, **Gemini**, **Ollama** y **OpenAI/LM-Studio**
+- `TaskType` enum - Light vs Deep analysis
 
-**Implementaciones de proveedores**:
-- `consultar_anthropic()` - Anthropic Claude (Opus, Sonnet, Haiku)
-- `consultar_gemini_content()` - Google Gemini Content API
-- `consultar_gemini_interactions()` - Google Gemini Interactions API
-
-**Sistema de fallback**:
-- `ejecutar_con_fallback()` - Intenta modelo primario, fallback automático si falla
-- Tracking de tokens y costos por consulta
+**Proveedores Pro**:
+- **IA Local**: Soporte nativo para Ollama y LM Studio
+- **Fallback Dinámico**: Cambio automático entre proveedores
 
 **Dependencias**:
 - `reqwest` - Cliente HTTP
@@ -202,6 +203,37 @@ El módulo AI ha sido refactorizado en submódulos especializados para mejor man
 - `crate::config` - Para configuración del proyecto
 - `serde` - Serialización/deserialización JSON
 - `colored` - Output colorido en consola
+
+---
+
+### `kb/` (v5.0.0 Pro - Etapa 2)
+**Responsabilidad**: Gestión de la Base de Conocimiento Local (Knowledge Base)
+
+Módulo encargado de indexar el código fuente y proporcionar contexto semántico a la IA.
+
+#### `kb/indexer.rs`
+**Responsabilidad**: Análisis sintáctico y extracción de símbolos
+- Usa `tree-sitter` para parsear código TypeScript/JavaScript.
+- Extrae clases, funciones, métodos e interfaces.
+- Genera resúmenes sintácticos para indexación.
+
+#### `kb/vector_db.rs`
+**Responsabilidad**: Gestión de la base de datos vectorial (Qdrant)
+- Inicializa colecciones en Qdrant.
+- Almacena code embeddings con metadatos (ruta, líneas, contenido).
+- Realiza búsquedas por similitud vectorial.
+
+#### `kb/context.rs`
+**Responsabilidad**: Construcción de contexto semántico
+- Genera embeddings para consultas de usuario o cambios de código.
+- Recupera los fragmentos de código más relevantes de la Vector DB.
+- Formatea el contexto para inyectarlo en los prompts de la IA.
+
+#### `kb/manager.rs`
+**Responsabilidad**: Orquestación y procesos en background
+- Gestiona la indexación inicial del proyecto completo.
+- Procesa actualizaciones incrementales en segundo plano (vía Tokio mpsc).
+- Coordina la generación de embeddings en batches para optimizar el uso de APIs.
 
 ---
 

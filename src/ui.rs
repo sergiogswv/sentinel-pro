@@ -3,7 +3,7 @@
 //! Funciones relacionadas con la interacción con el usuario en la terminal.
 
 use crate::ai;
-use crate::config::{ModelConfig, SentinelConfig};
+use crate::config::SentinelConfig;
 use colored::*;
 use std::fs;
 use std::io::{self, Write};
@@ -12,21 +12,38 @@ use std::path::{Path, PathBuf};
 /// Muestra el banner ASCII art de Sentinel al inicio del programa
 pub fn mostrar_banner() {
     println!();
-    println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_cyan());
-    println!("{}", r"
+    println!(
+        "{}",
+        "╔═══════════════════════════════════════════════════════════╗".bright_cyan()
+    );
+    println!(
+        "{}",
+        r"
    ███████╗███████╗███╗   ██╗████████╗██╗███╗   ██╗███████╗██╗     
    ██╔════╝██╔════╝████╗  ██║╚══██╔══╝██║████╗  ██║██╔════╝██║     
    ███████╗█████╗  ██╔██╗ ██║   ██║   ██║██╔██╗ ██║█████╗  ██║     
    ╚════██║██╔══╝  ██║╚██╗██║   ██║   ██║██║╚██╗██║██╔══╝  ██║     
    ███████║███████╗██║ ╚████║   ██║   ██║██║ ╚████║███████╗███████╗
    ╚══════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝
-".bright_cyan().bold());
-    println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_cyan());
+"
+        .bright_cyan()
+        .bold()
+    );
+    println!(
+        "{}",
+        "╚═══════════════════════════════════════════════════════════╝".bright_cyan()
+    );
     println!();
-    println!("{}", "              🛡️  AI-Powered Code Monitor  🛡️".bright_white().bold());
-    println!("{}", "              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".bright_cyan());
-    println!("{}", "                 Vigilando tu código 24/7 ⚡".bright_yellow());
-    println!();
+    println!(
+        "{}",
+        "           🛡️  Sentinel Pro: AI-Powered Code Suite  🛡️"
+            .bright_white()
+            .bold()
+    );
+    println!(
+        "{}",
+        "           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".bright_cyan()
+    );
 }
 
 /// Presenta un menú interactivo para seleccionar un proyecto del directorio padre.
@@ -120,9 +137,13 @@ pub fn mostrar_ayuda(config: Option<&SentinelConfig>) {
 
     // Mostrar comando T solo si hay testing configurado
     if let Some(cfg) = config {
-        if cfg.testing_framework.is_some() &&
-           cfg.testing_status.as_ref().map_or(false, |s| s == "valid") {
-            println!("{}", "  t       Ver sugerencias de testing complementarias".dimmed());
+        if cfg.testing_framework.is_some()
+            && cfg.testing_status.as_ref().map_or(false, |s| s == "valid")
+        {
+            println!(
+                "{}",
+                "  t       Ver sugerencias de testing complementarias".dimmed()
+            );
         }
     }
 
@@ -153,7 +174,10 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
         cfg
     } else {
         // Nueva configuración - pedir API keys
-        println!("{}", "🚀 Configurando nuevo proyecto en Sentinel...".bright_cyan());
+        println!(
+            "{}",
+            "🚀 Configurando nuevo proyecto en Sentinel...".bright_cyan()
+        );
 
         let mut config = SentinelConfig::default(
             nombre.clone(),
@@ -166,40 +190,98 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
             vec![],
         );
 
-        println!("\n{}", "🤖 Configuración de Modelos AI".bright_magenta().bold());
+        println!(
+            "\n{}",
+            "🤖 Configuración de Modelos AI".bright_magenta().bold()
+        );
 
-        // 1. Configurar Modelo Principal
-        println!("\n--- MODELO PRINCIPAL ---");
-        print!("👉 API Key: ");
+        // 1. Seleccionar Proveedor
+        println!("\n--- SELECCIÓN DE PROVEEDOR ---");
+        println!("1. Anthropic (Claude)");
+        println!("2. Google Gemini");
+        println!("3. Ollama (IA Local)");
+        println!("4. LM Studio / OpenAI Compat (IA Local)");
+        print!("👉 Selecciona número [1]: ");
         io::stdout().flush().unwrap();
-        let mut api_key = String::new();
-        io::stdin().read_line(&mut api_key).unwrap();
-        config.primary_model.api_key = api_key.trim().to_string();
+        let mut provider_sel = String::new();
+        io::stdin().read_line(&mut provider_sel).unwrap();
 
-        print!("👉 URL [Enter para Anthropic]: ");
-        io::stdout().flush().unwrap();
-        let mut url = String::new();
-        io::stdin().read_line(&mut url).unwrap();
-        if !url.trim().is_empty() {
-            config.primary_model.url = url.trim().to_string();
-        }
-
-        // Listar modelos si es Gemini
-        if config.primary_model.url.contains("googleapis") {
-            if let Ok(modelos) = ai::listar_modelos_gemini(&config.primary_model.api_key) {
-                println!("{}", "📂 Modelos disponibles:".cyan());
-                for (i, m) in modelos.iter().enumerate() {
-                    println!("{}. {}", i + 1, m);
-                }
-                print!("👉 Selecciona número: ");
+        match provider_sel.trim() {
+            "2" => {
+                config.primary_model.provider = "gemini".to_string();
+                config.primary_model.url = "https://generativelanguage.googleapis.com".to_string();
+                println!("\n--- CONFIGURACIÓN GEMINI ---");
+                print!("👉 API Key: ");
                 io::stdout().flush().unwrap();
-                let mut sel = String::new();
-                io::stdin().read_line(&mut sel).unwrap();
-                if let Ok(idx) = sel.trim().parse::<usize>() {
-                    if idx > 0 && idx <= modelos.len() {
-                        config.primary_model.name = modelos[idx - 1].clone();
+                let mut ak = String::new();
+                io::stdin().read_line(&mut ak).unwrap();
+                config.primary_model.api_key = ak.trim().to_string();
+
+                if let Ok(modelos) = ai::listar_modelos_gemini(&config.primary_model.api_key) {
+                    println!("{}", "📂 Modelos disponibles:".cyan());
+                    for (i, m) in modelos.iter().enumerate() {
+                        println!("{}. {}", i + 1, m);
+                    }
+                    print!("👉 Selecciona número: ");
+                    io::stdout().flush().unwrap();
+                    let mut sel = String::new();
+                    io::stdin().read_line(&mut sel).unwrap();
+                    if let Ok(idx) = sel.trim().parse::<usize>() {
+                        if idx > 0 && idx <= modelos.len() {
+                            config.primary_model.name = modelos[idx - 1].clone();
+                        }
                     }
                 }
+            }
+            "3" => {
+                config.primary_model.provider = "ollama".to_string();
+                config.primary_model.url = "http://localhost:11434".to_string();
+                println!("\n--- CONFIGURACIÓN OLLAMA ---");
+                print!("👉 URL [http://localhost:11434]: ");
+                io::stdout().flush().unwrap();
+                let mut u = String::new();
+                io::stdin().read_line(&mut u).unwrap();
+                if !u.trim().is_empty() {
+                    config.primary_model.url = u.trim().to_string();
+                }
+
+                print!("👉 Nombre del modelo (ej: llama3, codestral): ");
+                io::stdout().flush().unwrap();
+                let mut nm = String::new();
+                io::stdin().read_line(&mut nm).unwrap();
+                config.primary_model.name = nm.trim().to_string();
+            }
+            "4" => {
+                config.primary_model.provider = "openai".to_string();
+                println!("\n--- CONFIGURACIÓN OPENAI / LM STUDIO ---");
+                print!("👉 URL Base: ");
+                io::stdout().flush().unwrap();
+                let mut u = String::new();
+                io::stdin().read_line(&mut u).unwrap();
+                config.primary_model.url = u.trim().to_string();
+
+                print!("👉 API Key [Opcional para local]: ");
+                io::stdout().flush().unwrap();
+                let mut ak = String::new();
+                io::stdin().read_line(&mut ak).unwrap();
+                config.primary_model.api_key = ak.trim().to_string();
+
+                print!("👉 Nombre del modelo: ");
+                io::stdout().flush().unwrap();
+                let mut nm = String::new();
+                io::stdin().read_line(&mut nm).unwrap();
+                config.primary_model.name = nm.trim().to_string();
+            }
+            _ => {
+                config.primary_model.provider = "anthropic".to_string();
+                config.primary_model.url = "https://api.anthropic.com".to_string();
+                println!("\n--- CONFIGURACIÓN ANTHROPIC ---");
+                print!("👉 API Key: ");
+                io::stdout().flush().unwrap();
+                let mut ak = String::new();
+                io::stdin().read_line(&mut ak).unwrap();
+                config.primary_model.api_key = ak.trim().to_string();
+                config.primary_model.name = "claude-3-5-sonnet-20241022".to_string();
             }
         }
 
@@ -211,14 +293,20 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
         io::stdin().read_line(&mut use_fallback).unwrap();
 
         if use_fallback.trim().to_lowercase() == "s" {
-            let mut fb = ModelConfig::default();
+            let mut fb = crate::config::ModelConfig::default();
+            print!("👉 Proveedor (anthropic, gemini, ollama, openai): ");
+            io::stdout().flush().unwrap();
+            let mut prov = String::new();
+            io::stdin().read_line(&mut prov).unwrap();
+            fb.provider = prov.trim().to_string();
+
             print!("👉 API Key: ");
             io::stdout().flush().unwrap();
             let mut ak = String::new();
             io::stdin().read_line(&mut ak).unwrap();
             fb.api_key = ak.trim().to_string();
 
-            print!("👉 URL del modelo: ");
+            print!("👉 URL: ");
             io::stdout().flush().unwrap();
             let mut u = String::new();
             io::stdin().read_line(&mut u).unwrap();
@@ -231,6 +319,37 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
             fb.name = nm.trim().to_string();
 
             config.fallback_model = Some(fb);
+        }
+
+        // 3. Configurar Características Pro
+        println!("\n--- CARACTERÍSTICAS PRO ---");
+        print!("👉 ¿Habilitar Machine Learning y Knowledge Base Local? (s/n) [s]: ");
+        io::stdout().flush().unwrap();
+        let mut enable_pro = String::new();
+        io::stdin().read_line(&mut enable_pro).unwrap();
+
+        if enable_pro.trim().to_lowercase() != "n" {
+            config.features = Some(crate::config::FeaturesConfig {
+                enable_ml: true,
+                enable_agents: true,
+                enable_knowledge_base: true,
+            });
+
+            config.ml = Some(crate::config::MlConfig {
+                models_path: ".sentinel/models".to_string(),
+                embeddings_model: "codebert".to_string(),
+                bug_predictor_model: "bug-predictor-v1".to_string(),
+            });
+
+            config.knowledge_base = Some(crate::config::KnowledgeBaseConfig {
+                vector_db_url: "http://localhost:6333".to_string(),
+                index_on_start: true,
+            });
+
+            println!(
+                "{}",
+                "   ✨ Características Pro habilitadas por defecto.".green()
+            );
         }
 
         config
@@ -270,7 +389,10 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
 
     // Comparar con framework actual
     if tiene_config_existente && deteccion.framework == framework_actual {
-        println!("   ✓ Framework: {} (sin cambios)", deteccion.framework.green());
+        println!(
+            "   ✓ Framework: {} (sin cambios)",
+            deteccion.framework.green()
+        );
 
         // Detectar frameworks de testing si no está ya configurado
         if config.testing_framework.is_none() || config.testing_status.is_none() {
@@ -285,7 +407,10 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
                     let _ = config.save(project_path);
                 }
                 Err(e) => {
-                    println!("   ⚠️  Error al detectar testing framework: {}", e.to_string().yellow());
+                    println!(
+                        "   ⚠️  Error al detectar testing framework: {}",
+                        e.to_string().yellow()
+                    );
                     println!("   ℹ️  Continuando sin detección de testing");
                 }
             }
@@ -295,7 +420,8 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
             let testing_fw = config.testing_framework.as_ref().unwrap_or(&default_fw);
             let testing_status = config.testing_status.as_ref().unwrap_or(&default_status);
 
-            println!("   ✓ Testing: {} ({})",
+            println!(
+                "   ✓ Testing: {} ({})",
                 testing_fw.green(),
                 testing_status.cyan()
             );
@@ -308,10 +434,14 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
     println!("\n{}", "📋 Framework Detectado:".bright_yellow().bold());
     println!("   Framework: {}", deteccion.framework.bright_green());
     println!("   Lenguaje: {}", deteccion.code_language.bright_green());
-    println!("   Extensiones: {}", deteccion.extensions.join(", ").bright_green());
+    println!(
+        "   Extensiones: {}",
+        deteccion.extensions.join(", ").bright_green()
+    );
 
     if tiene_config_existente {
-        println!("\n   ⚠️  Cambio detectado: {} → {}",
+        println!(
+            "\n   ⚠️  Cambio detectado: {} → {}",
             framework_actual.yellow(),
             deteccion.framework.green()
         );
@@ -344,10 +474,12 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
                 ai::TestingStatus::Incomplete => "incomplete".to_string(),
                 ai::TestingStatus::Missing => "missing".to_string(),
             });
-
         }
         Err(e) => {
-            println!("   ⚠️  Error al detectar testing framework: {}", e.to_string().yellow());
+            println!(
+                "   ⚠️  Error al detectar testing framework: {}",
+                e.to_string().yellow()
+            );
             println!("   ℹ️  Continuando sin detección de testing");
         }
     }
@@ -355,4 +487,17 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
     let _ = config.save(project_path);
     println!("{}", "✅ Configuración actualizada.".green());
     config
+}
+
+/// Helper para mostrar una barra de progreso genérica
+pub fn crear_progreso(mensaje: &str) -> indicatif::ProgressBar {
+    let pb = indicatif::ProgressBar::new_spinner();
+    pb.set_style(
+        indicatif::ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    pb.set_message(mensaje.to_string());
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+    pb
 }

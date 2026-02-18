@@ -57,11 +57,8 @@ pub fn detectar_testing_framework(
     let analisis_estatico = analizar_archivos_proyecto(project_path);
 
     // 2. La IA hace todo el análisis dinámico
-    let testing_info = consultar_ia_para_testing_dinamico(
-        project_path,
-        config,
-        &analisis_estatico,
-    )?;
+    let testing_info =
+        consultar_ia_para_testing_dinamico(project_path, config, &analisis_estatico)?;
 
     // Mostrar resultados
     mostrar_resumen_testing(&testing_info);
@@ -76,13 +73,24 @@ fn analizar_archivos_proyecto(project_path: &Path) -> AnalisisEstatico {
 
     // Buscar archivos de configuración de testing comunes
     let archivos_comunes = vec![
-        "jest.config.js", "jest.config.ts", "jest.config.json",
-        "vitest.config.js", "vitest.config.ts",
-        "cypress.json", "cypress.config.js", "cypress.config.ts",
-        "playwright.config.js", "playwright.config.ts",
-        "karma.conf.js", "pytest.ini", "pyproject.toml",
-        "phpunit.xml", "phpunit.xml.dist", "pest.php",
-        ".rspec", "spec_helper.rb",
+        "jest.config.js",
+        "jest.config.ts",
+        "jest.config.json",
+        "vitest.config.js",
+        "vitest.config.ts",
+        "cypress.json",
+        "cypress.config.js",
+        "cypress.config.ts",
+        "playwright.config.js",
+        "playwright.config.ts",
+        "karma.conf.js",
+        "pytest.ini",
+        "pyproject.toml",
+        "phpunit.xml",
+        "phpunit.xml.dist",
+        "pest.php",
+        ".rspec",
+        "spec_helper.rb",
     ];
 
     for archivo in archivos_comunes {
@@ -209,9 +217,7 @@ fn consultar_ia_para_testing_dinamico(
 
     let respuesta = consultar_ia(
         prompt,
-        &config.primary_model.api_key,
-        &config.primary_model.url,
-        &config.primary_model.name,
+        &config.primary_model,
         Arc::new(Mutex::new(SentinelStats::default())),
     )?;
 
@@ -236,8 +242,14 @@ fn parsear_testing_info(respuesta: &str) -> anyhow::Result<TestingFrameworkInfo>
             Ok(info)
         }
         Err(e) => {
-            println!("   ⚠️  Error al parsear respuesta: {}", e.to_string().yellow());
-            println!("   Respuesta recibida: {}", json_str.chars().take(200).collect::<String>());
+            println!(
+                "   ⚠️  Error al parsear respuesta: {}",
+                e.to_string().yellow()
+            );
+            println!(
+                "   Respuesta recibida: {}",
+                json_str.chars().take(200).collect::<String>()
+            );
             // Fallback básico
             Ok(TestingFrameworkInfo {
                 testing_framework: None,
@@ -304,9 +316,7 @@ pub fn obtener_sugerencias_complementarias(
 
     let respuesta = consultar_ia(
         prompt,
-        &config.primary_model.api_key,
-        &config.primary_model.url,
-        &config.primary_model.name,
+        &config.primary_model,
         Arc::new(Mutex::new(SentinelStats::default())),
     )?;
 
@@ -349,8 +359,10 @@ fn mostrar_resumen_testing(info: &TestingFrameworkInfo) {
                 println!("   📦 Framework principal: {}", main.green().bold());
             }
             if !info.additional_frameworks.is_empty() {
-                println!("   🔧 Frameworks adicionales: {}",
-                    info.additional_frameworks.join(", ").cyan());
+                println!(
+                    "   🔧 Frameworks adicionales: {}",
+                    info.additional_frameworks.join(", ").cyan()
+                );
             }
             if !info.config_files.is_empty() {
                 println!("   📄 Configuración encontrada:");
@@ -380,7 +392,12 @@ fn mostrar_resumen_testing(info: &TestingFrameworkInfo) {
                 2 => "⭐",
                 _ => "💡",
             };
-            println!("\n   {} {}. {}", priority_icon, i + 1, suggestion.framework.bold());
+            println!(
+                "\n   {} {}. {}",
+                priority_icon,
+                i + 1,
+                suggestion.framework.bold()
+            );
             println!("      📝 {}", suggestion.reason);
             println!("      💻 {}", suggestion.install_command.cyan());
         }

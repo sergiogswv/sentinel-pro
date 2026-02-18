@@ -238,11 +238,29 @@ Actualmente se encuentra en proceso de evaluación la viabilidad técnica y estr
 
 ---
 
-## Fase 5: Expansión Multiplataforma (En Progreso 🚧)
+## Fase 5: Sentinel Pro - Advanced CLI & Local AI (En Progreso 🚧)
 
-**Enfoque:** Soporte especializado para frameworks y lenguajes de programación adicionales
+**Enfoque:** Potenciar la productividad con herramientas locales, motor de reglas y CLI avanzado.
 
-**Estado Actual:** Sentinel ya cuenta con detección automática de frameworks por IA (v4.4.1) que identifica y adapta las validaciones a diferentes tecnologías. Las siguientes mejoras buscan agregar reglas especializadas y patrones específicos por framework.
+**🎉 LANZAMIENTO v5.0.0-pro - Sentinel Pro (Stage 1)**
+
+- [x] **Rediseño de CLI Dispatcher**: Implementación con `clap` para subcomandos anidados.
+- [x] **Comandos Pro (Initial Stubs)**: `analyze`, `generate`, `refactor`, `fix`, `chat`.
+- [x] **Soporte IA Local (Ollama / LM Studio)**: Integración nativa para privacidad total.
+- [x] **Motor de Reglas YAML**: Validación estática de arquitectura pre-IA (`.sentinel/rules.yaml`).
+- [x] **Configuración Pro**: Soporte para ML, Knowledge Base y Agentes.
+- [ ] **AI Multi-Agent System**: Agentes especializados (Architect, QA, Dev) - *En desarrollo*.
+- [x] **Knowledge Base Local**: Indexación vectorial del código fuente (v5.0.0-pro.alpha.2).
+
+**Current Version:** v5.0.0-pro.alpha.2
+
+**Key Achievements:**
+- Robust CLI architecture for extensible commands.
+- 100% Offline AI support via local models (Ollama/LM Studio).
+- Blazing-fast architecture validation using rules engine.
+- Expanded configuration for high-level AI features.
+
+---
 
 ### Soporte para Frameworks JavaScript/TypeScript
 
@@ -791,8 +809,7 @@ Explorando tecnologías de vanguardia:
 |---------|----------------|---------|--------|
 | v4.4.2 | Feb 2025 | Configuration Management & Stability | ✅ Completado |
 | v4.4.3 | Feb 2025 | AI Module Refactoring & Code Organization | ✅ Completado |
-| v4.5.0 | Q1-Q2 2025 | Evaluación de compatibilidad con proveedores de IA adicionales | 🔍 En evaluación |
-| v5.0.0 | Q2-Q3 2025 | Expansión multiplataforma (frameworks y lenguajes) | 📋 Planificado |
+| v5.0.0 | Feb 2025 | Sentinel Pro: CLI, Local AI & Rules Engine | 🚧 En Progreso |
 | v6.0.0 | Q3-Q4 2025 | Características SecOps | 📋 Planificado |
 | v7.0.0 | Q4 2025 | PR review automation | 📋 Planificado |
 | v8.0.0 | Q1 2026 | Enterprise features | 📋 Planificado |

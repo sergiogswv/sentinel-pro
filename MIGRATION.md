@@ -411,5 +411,5 @@ Si el archivo `.sentinelrc.toml` no se puede leer, Sentinel mostrará un mensaje
 
 ---
 
-**Última actualización:** 2025-02-05
-**Versión:** 4.4.2
+**Última actualización:** 2025-02-17
+**Versión:** 5.0.0-pro.alpha.2

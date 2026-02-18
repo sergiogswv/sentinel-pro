@@ -18,7 +18,7 @@ The configuration includes:
 ## Configuration Structure
 
 ```toml
-version = "4.4.3"  # Configuration format version
+version = "5.0.0-pro.alpha.2"
 project_name = "mi-proyecto"
 framework = "NestJS"
 manager = "npm"
@@ -28,8 +28,15 @@ file_extensions = ["js", "ts", "jsx", "tsx"]
 ignore_patterns = ["node_modules", "dist", ".git", "build"]
 use_cache = true
 
+[features]
+enable_knowledge_base = true  # New in Stage 2
+
+[knowledge_base]
+vector_db_url = "http://localhost:6333"
+index_on_start = true
+
 [primary_model]
-name = "claude-opus-4-5-20251101"
+name = "claude-3-5-sonnet-20241022"
 url = "https://api.anthropic.com"
 api_key = "sk-ant-api03-..."
 
