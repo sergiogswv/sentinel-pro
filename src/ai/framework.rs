@@ -3,7 +3,7 @@
 //! Analiza archivos del proyecto para identificar el framework principal,
 //! lenguaje de programación, patrones de arquitectura y configuraciones.
 
-use crate::ai::client::consultar_ia;
+use crate::ai::client::{consultar_ia, TaskType};
 use crate::config::{FrameworkDetection, SentinelConfig};
 use crate::stats::SentinelStats;
 use colored::*;
@@ -70,18 +70,18 @@ pub fn detectar_framework_con_ia(
         1. Framework vs Lenguaje: No respondas con el nombre del lenguaje (ej. TypeScript, Python). \
         Identifica el framework que dicta la estructura (ej. React, FastAPI, NestJS).\n\
         2. Jerarquía de Decisión:\n\
-           - Si detectas 'react', el framework es \"React\" (aunque use Vite o Next, prioriza el ecosistema).\n\
-           - Si detectas '@nestjs/core', el framework es \"NestJS\", no \"Node.js\".\n\
-           - Si detectas 'actix-web' o 'axum' en un Cargo.toml, el framework es el nombre del crate.\n\
+        - Si detectas 'react', el framework es \"React\" (aunque use Vite o Next, prioriza el ecosistema).\n\
+        - Si detectas '@nestjs/core', el framework es \"NestJS\", no \"Node.js\".\n\
+        - Si detectas 'actix-web' o 'axum' en un Cargo.toml, el framework es el nombre del crate.\n\
         3. Precisión en Monorepos: Si ves múltiples configuraciones, identifica la que define la ejecución principal.\n\n\
         RESPONDE EXCLUSIVAMENTE EN JSON:\n\
         {{\n\
-          \"framework\": \"Nombre específico del framework (ej. React, Django, Axum)\",\n\
-          \"code_language\": \"Lenguaje base (ej. typescript, rust, python)\",\n\
-          \"rules\": [\"4 principios técnicos clave\"],\n\
-          \"extensions\": [\"ts\", \"tsx\", \"js\", etc],\n\
-          \"parent_patterns\": [\"sufijos de arquitectura\"],\n\
-          \"test_patterns\": [\"rutas de tests con {{{{name}}}}\"]\n\
+        \"framework\": \"Nombre específico del framework (ej. React, Django, Axum)\",\n\
+        \"code_language\": \"Lenguaje base (ej. typescript, rust, python)\",\n\
+        \"rules\": [\"4 principios técnicos clave\"],\n\
+        \"extensions\": [\"ts\", \"tsx\", \"js\", etc],\n\
+        \"parent_patterns\": [\"sufijos de arquitectura\"],\n\
+        \"test_patterns\": [\"rutas de tests con {{{{name}}}}\"]\n\
         }}\n\n\
         IMPORTANTE: Si no hay un framework claro, identifica la librería de entrada (entry-point) principal. \
         Prohibido responder con nombres genéricos como \"JavaScript/TypeScript\".",
@@ -93,6 +93,7 @@ pub fn detectar_framework_con_ia(
         prompt_inicial,
         &config.primary_model,
         Arc::new(Mutex::new(SentinelStats::default())),
+        TaskType::Deep,
     )?;
 
     // Si la IA pide leer un archivo
@@ -115,18 +116,18 @@ pub fn detectar_framework_con_ia(
                 INSTRUCCIONES CRÍTICAS:\n\
                 1. Framework vs Lenguaje: Identifica el framework que dicta la arquitectura, NO el lenguaje.\n\
                 2. Jerarquía:\n\
-                   - 'react' en dependencies → Framework: \"React\"\n\
-                   - '@nestjs/core' → Framework: \"NestJS\"\n\
-                   - 'Django' → Framework: \"Django\"\n\
+                - 'react' en dependencies → Framework: \"React\"\n\
+                - '@nestjs/core' → Framework: \"NestJS\"\n\
+                - 'Django' → Framework: \"Django\"\n\
                 3. Prohibido responder con nombres genéricos como \"TypeScript\" o \"JavaScript\".\n\n\
                 RESPONDE EN JSON:\n\
                 {{\n\
-                  \"framework\": \"Nombre específico del framework\",\n\
-                  \"code_language\": \"lenguaje base\",\n\
-                  \"rules\": [\"4 principios clave\"],\n\
-                  \"extensions\": [\"extensiones\"],\n\
-                  \"parent_patterns\": [\"sufijos o []\"],\n\
-                  \"test_patterns\": [\"rutas con {{{{name}}}}\"]\n\
+                \"framework\": \"Nombre específico del framework\",\n\
+                \"code_language\": \"lenguaje base\",\n\
+                \"rules\": [\"4 principios clave\"],\n\
+                \"extensions\": [\"extensiones\"],\n\
+                \"parent_patterns\": [\"sufijos o []\"],\n\
+                \"test_patterns\": [\"rutas con {{{{name}}}}\"]\n\
                 }}\n\n\
                 IMPORTANTE: SOLO JSON, sin texto adicional.",
                 archivos_str, archivo, contenido_limitado
@@ -136,6 +137,7 @@ pub fn detectar_framework_con_ia(
                 prompt_con_contenido,
                 &config.primary_model,
                 Arc::new(Mutex::new(SentinelStats::default())),
+                TaskType::Deep,
             )?;
 
             return parsear_deteccion_framework(&respuesta_final);

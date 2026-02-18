@@ -71,7 +71,7 @@ impl Default for ModelConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct SentinelConfig {
     pub version: String,
     pub project_name: String,

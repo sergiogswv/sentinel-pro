@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.0.0--pro-purple.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-5.0.0--pro.alpha.4-purple.svg" alt="Version">
   <img src="https://img.shields.io/badge/rust-2024-orange.svg" alt="Rust">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
 </p>
@@ -26,6 +26,7 @@ Real-time monitoring tool written in **Rust** that analyzes code changes using *
 - 🏗️ **Framework Rule Engine** - YAML-based architecture validation (Pre-AI)
 - 🧠 **Local Knowledge Base** - Code indexing and vector store for deep context
 - ⚡ **Pro CLI Commands** - `analyze`, `generate`, `refactor`, `fix`, `chat`
+- 👥 **Multi-Agent System** - Specialized agents (Coder, Reviewer) for complex tasks
 - 💾 **Smart Caching** - Reduces API costs up to 70%
 - 📊 **Real-time Metrics** - Tracking bugs, costs, tokens, and productivity
 - 🧪 **Autonomous Testing** - AI-assisted test generation and execution
@@ -80,9 +81,9 @@ Once started, Sentinel responds to these commands:
 Access advanced features using the `pro` sub-command:
 
 ```bash
-sentinel pro analyze <file>   # Deep architectural analysis
-sentinel pro generate <file>  # Generate code from local context
-sentinel pro refactor <file>  # Proactive refactoring suggestions
+sentinel pro analyze <file>   # Deep architectural analysis (Reviewer Agent)
+sentinel pro generate <file>  # Generate code from local context (Coder Agent)
+sentinel pro refactor <file>  # Proactive refactoring suggestions (Coder Agent)
 sentinel pro fix <file>       # Intelligent bug fixing
 sentinel pro chat             # Interactive codebase chat
 ```
@@ -193,8 +194,8 @@ Phase 2: ✅ Completed - Productivity and documentation
 Phase 3: ✅ Completed - Optimization and stability
 Phase 4: ✅ Completed - Multi-model AI & Parent file detection (v4.5.0)
 Phase 5: ✅ Completed - CLI Dispatcher, Local LLMs & Rules Engine (v5.0.0-pro)
-Phase 6: ✅ Completed - Local Knowledge Base & Vector Search
-Phase 7: 🚀 Starting - AI Multi-Agent System (Architect, QA, Dev)
+Phase 6: ✅ Completed - Local Knowledge Base & Vector Search (v5.0.0-pro.alpha.4)
+Phase 7: 🚧 In Progress - AI Multi-Agent System (Architect, QA, Dev)
 Phase 8: 📅 Planned - SecOps & Automated Code Reviews
 ```
 

@@ -4,7 +4,7 @@
 //! valida sus configuraciones y sugiere alternativas apropiadas basadas
 //! en el framework principal detectado.
 
-use crate::ai::client::consultar_ia;
+use crate::ai::client::{consultar_ia, TaskType};
 use crate::config::SentinelConfig;
 use crate::stats::SentinelStats;
 use colored::*;
@@ -219,6 +219,7 @@ fn consultar_ia_para_testing_dinamico(
         prompt,
         &config.primary_model,
         Arc::new(Mutex::new(SentinelStats::default())),
+        TaskType::Deep,
     )?;
 
     parsear_testing_info(&respuesta)
@@ -318,6 +319,7 @@ pub fn obtener_sugerencias_complementarias(
         prompt,
         &config.primary_model,
         Arc::new(Mutex::new(SentinelStats::default())),
+        TaskType::Deep,
     )?;
 
     // Extraer JSON

@@ -24,7 +24,7 @@ pub enum TaskType {
 /// Punto de entrada inteligente con Fallback y Caché
 pub fn consultar_ia_dinamico(
     prompt: String,
-    _task: TaskType,
+    task: TaskType,
     config: &SentinelConfig,
     stats: Arc<Mutex<SentinelStats>>,
     project_path: &Path,
@@ -46,6 +46,7 @@ pub fn consultar_ia_dinamico(
         modelo_principal,
         config.fallback_model.as_ref(),
         Arc::clone(&stats),
+        task,
     );
 
     // 4. Guardar en Caché si tuvo éxito
@@ -63,8 +64,9 @@ fn ejecutar_con_fallback(
     principal: &ModelConfig,
     fallback: Option<&ModelConfig>,
     stats: Arc<Mutex<SentinelStats>>,
+    task: TaskType,
 ) -> anyhow::Result<String> {
-    match consultar_ia(prompt.clone(), principal, Arc::clone(&stats)) {
+    match consultar_ia(prompt.clone(), principal, Arc::clone(&stats), task) {
         Ok(res) => Ok(res),
         Err(e) => {
             if let Some(fb) = fallback {
@@ -76,7 +78,7 @@ fn ejecutar_con_fallback(
                     )
                     .yellow()
                 );
-                consultar_ia(prompt, fb, stats)
+                consultar_ia(prompt, fb, stats, task)
             } else {
                 Err(e)
             }
@@ -88,8 +90,17 @@ pub fn consultar_ia(
     prompt: String,
     model: &ModelConfig,
     stats: Arc<Mutex<SentinelStats>>,
+    task: TaskType,
 ) -> anyhow::Result<String> {
-    let client = Client::new();
+    let timeout = match task {
+        TaskType::Light => std::time::Duration::from_secs(30),
+        TaskType::Deep => std::time::Duration::from_secs(120),
+    };
+
+    let client = Client::builder()
+        .timeout(timeout)
+        .build()
+        .unwrap_or_else(|_| Client::new());
 
     let prompt_len = prompt.len();
     let resultado = if !model.provider.is_empty() {

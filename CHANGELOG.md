@@ -4,6 +4,21 @@ All notable changes to Sentinel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [5.0.0-pro.alpha.3] - 2026-02-18
+
+### 👥 Sistema Multi-Agent (Etapa 3)
+
+#### Arquitectura de Agentes
+- **Agent Trait**: Definición de la interfaz común para agentes autónomos.
+- **Agent Orchestrator**: Sistema de gestión y ejecución concurrente de agentes.
+- **CoderAgent**: Agente especializado en generación y refactorización de código con prompts estructurados.
+- **ReviewerAgent**: Agente especializado en Code Review, auditoría de seguridad y Clean Code.
+
+#### Integración CLI
+- **`sentinel pro generate`**: Ahora utiliza `CoderAgent` para generar implementaciones inteligentes.
+- **`sentinel pro analyze`**: Conectado a `ReviewerAgent` para reportes de arquitectura y seguridad.
+- **`sentinel pro refactor`**: Automatizado via `CoderAgent` con instrucciones de mejora específicas.
+
 ## [5.0.0-pro.alpha.2] - 2025-02-17
 
 ### 🧠 Knowledge Base & Vector Store (Etapa 2)

@@ -111,6 +111,19 @@ impl CodeIndex {
         Ok(all_symbols)
     }
 
+    pub fn update_files(&mut self, files: &[String]) -> anyhow::Result<Vec<CodeSymbol>> {
+        let mut updated_symbols = Vec::new();
+        for file_path_str in files {
+            let path = Path::new(file_path_str);
+            if path.exists() {
+                 if let Ok(mut symbols) = self.parse_file(path) {
+                    updated_symbols.append(&mut symbols);
+                }
+            }
+        }
+        Ok(updated_symbols)
+    }
+
     fn explore_dir(&mut self, dir: &Path, symbols: &mut Vec<CodeSymbol>) -> anyhow::Result<()> {
         if dir.is_dir() {
             for entry in std::fs::read_dir(dir)? {

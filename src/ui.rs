@@ -46,18 +46,16 @@ pub fn mostrar_banner() {
     );
 }
 
+use dialoguer::{theme::ColorfulTheme, Select};
+
 /// Presenta un menú interactivo para seleccionar un proyecto del directorio padre.
 ///
 /// Escanea el directorio padre (`../`) y muestra todos los subdirectorios como
-/// opciones de proyectos. El usuario selecciona mediante un número.
+/// opciones de proyectos. El usuario selecciona navegando con flechas.
 ///
 /// # Retorna
 ///
 /// PathBuf del proyecto seleccionado.
-///
-/// # Nota
-///
-/// Si el usuario ingresa un número inválido, por defecto selecciona el proyecto 1.
 pub fn seleccionar_proyecto() -> PathBuf {
     println!("{}", "\n📂 Proyectos detectados:".bright_cyan().bold());
 
@@ -86,31 +84,27 @@ pub fn seleccionar_proyecto() -> PathBuf {
         std::process::exit(1);
     }
 
-    for (i, p) in proyectos.iter().enumerate() {
-        let nombre = p
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("<nombre inválido>");
-        println!("{}. {}", i + 1, nombre);
-    }
+    let nombres: Vec<String> = proyectos
+        .iter()
+        .map(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("<nombre inválido>")
+                .to_string()
+        })
+        .collect();
 
-    print!("\n👉 Selecciona número: ");
-    io::stdout().flush().unwrap();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-
-    let idx = match input.trim().parse::<usize>() {
-        Ok(n) if n > 0 && n <= proyectos.len() => n - 1,
-        _ => {
-            eprintln!(
-                "❌ Selección inválida. Usa un número entre 1 y {}",
-                proyectos.len()
-            );
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Selecciona un proyecto usando las flechas (↑/↓) y Enter")
+        .default(0)
+        .items(&nombres)
+        .interact()
+        .unwrap_or_else(|_| {
+            eprintln!("{}", "❌ Selección cancelada.".red());
             std::process::exit(1);
-        }
-    };
+        });
 
-    proyectos[idx].clone()
+    proyectos[selection].clone()
 }
 
 /// Muestra la ayuda de comandos disponibles
@@ -152,6 +146,17 @@ pub fn mostrar_ayuda(config: Option<&SentinelConfig>) {
         "  x       Reiniciar configuración desde cero".dimmed()
     );
     println!("{}", "  h/help  Mostrar esta ayuda".dimmed());
+    println!(
+        "{}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".bright_cyan()
+    );
+    println!("{}", "🚀 COMANDOS PRO (Ejecutar en terminal)".bright_magenta().bold());
+    println!("  sentinel pro analyze <file>   {}", "Análisis arquitectónico (Reviewer)".dimmed());
+    println!("  sentinel pro generate <file>  {}", "Generación de código (Coder)".dimmed());
+    println!("  sentinel pro refactor <file>  {}", "Refactorización (Refactor)".dimmed());
+    println!("  sentinel pro fix <file>       {}", "Corrección de bugs".dimmed());
+    println!("  sentinel pro test-all         {}", "Generación de tests (Tester)".dimmed());
+    println!("  sentinel pro chat             {}", "Chat con el codebase".dimmed());
     println!(
         "{}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n".bright_cyan()

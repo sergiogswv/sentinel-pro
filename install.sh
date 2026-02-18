@@ -50,20 +50,28 @@ RUST_VERSION=$(rustc --version | awk '{print $2}')
 info "Versión de Rust: $RUST_VERSION"
 
 # Compilar el proyecto
-info "Compilando Sentinel Rust..."
+info "Compilando Sentinel Pro..."
 cargo build --release || error "Falló la compilación del proyecto"
 success "Compilación exitosa"
 
 # Crear directorio de instalación
-INSTALL_DIR="$HOME/.sentinel-rust"
-info "Creando directorio de instalación en $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR"
+# Preferimos ~/.local/bin si existe, sino ~/.sentinel-pro
+INSTALL_DIR="$HOME/.sentinel-pro"
+BIN_NAME="sentinel-pro"
+
+if [ -d "$HOME/.local/bin" ] && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
+    INSTALL_DIR="$HOME/.local/bin"
+    info "Detectado ~/.local/bin en el PATH. Instalando allí..."
+else
+    info "Creando directorio de instalación en $INSTALL_DIR..."
+    mkdir -p "$INSTALL_DIR"
+fi
 
 # Copiar el binario
-info "Instalando binario..."
-cp target/release/sentinel-rust "$INSTALL_DIR/sentinel" || error "Falló la copia del binario"
-chmod +x "$INSTALL_DIR/sentinel"
-success "Binario instalado en $INSTALL_DIR/sentinel"
+info "Instalando binario en $INSTALL_DIR..."
+cp target/release/sentinel-pro "$INSTALL_DIR/$BIN_NAME" || error "Falló la copia del binario"
+chmod +x "$INSTALL_DIR/$BIN_NAME"
+success "Binario instalado en $INSTALL_DIR/$BIN_NAME"
 
 # Agregar al PATH si no está
 SHELL_RC=""
@@ -74,14 +82,14 @@ elif [ -f "$HOME/.zshrc" ]; then
 fi
 
 if [ -n "$SHELL_RC" ]; then
-    if ! grep -q "sentinel-rust" "$SHELL_RC"; then
-        info "Agregando Sentinel al PATH en $SHELL_RC..."
+    if ! grep -q "sentinel-pro" "$SHELL_RC"; then
+        info "Agregando Sentinel Pro al PATH en $SHELL_RC..."
         echo "" >> "$SHELL_RC"
-        echo "# Sentinel Rust" >> "$SHELL_RC"
-        echo "export PATH=\"\$HOME/.sentinel-rust:\$PATH\"" >> "$SHELL_RC"
+        echo "# Sentinel Pro" >> "$SHELL_RC"
+        echo "export PATH=\"\$HOME/.sentinel-pro:\$PATH\"" >> "$SHELL_RC"
         success "PATH actualizado. Por favor ejecuta: source $SHELL_RC"
     else
-        info "Sentinel ya está en el PATH"
+        info "Sentinel Pro ya está en el PATH"
     fi
 fi
 

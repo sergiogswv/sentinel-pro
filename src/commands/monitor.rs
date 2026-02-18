@@ -267,7 +267,10 @@ pub fn start_monitor() {
                 Some(respuesta) if respuesta == "s" => {
                     if let Ok(codigo) = std::fs::read_to_string(&changed_path) {
                         // Validar Reglas Pro (Estáticas)
+                        let spinner = ui::crear_progreso("   🔍 Validando reglas estáticas...");
                         let violaciones = rule_engine.validate_file(&changed_path, &codigo);
+                        spinner.finish_and_clear();
+
                         if !violaciones.is_empty() {
                             println!(
                                 "\n🚩 {}",
@@ -278,14 +281,18 @@ pub fn start_monitor() {
                             }
                         }
 
-                        match ai::analizar_arquitectura(
+                        let spinner_ai = ui::crear_progreso("   🤖 Analizando arquitectura con IA...");
+                        let resultado_analisis = ai::analizar_arquitectura(
                             &codigo,
                             &file_name,
                             Arc::clone(&stats),
                             &config,
                             &project_path,
                             &changed_path,
-                        ) {
+                        );
+                        spinner_ai.finish_and_clear();
+
+                        match resultado_analisis {
                             Ok(true) => {
                                 println!(
                                     "   ✅ Código revisado. Sin tests, no se realizará commit automático."
@@ -314,7 +321,10 @@ pub fn start_monitor() {
 
             if let Ok(codigo) = std::fs::read_to_string(&changed_path) {
                 // Validar Reglas Pro (Estáticas)
+                let spinner = ui::crear_progreso("   🔍 Validando reglas estáticas...");
                 let violaciones = rule_engine.validate_file(&changed_path, &codigo);
+                spinner.finish_and_clear();
+
                 if !violaciones.is_empty() {
                     println!(
                         "\n🚩 {}",
@@ -330,14 +340,18 @@ pub fn start_monitor() {
                     }
                 }
 
-                match ai::analizar_arquitectura(
+                let spinner_ai = ui::crear_progreso("   🤖 Analizando arquitectura con IA...");
+                let resultado_analisis = ai::analizar_arquitectura(
                     &codigo,
                     &file_name,
                     Arc::clone(&stats),
                     &config,
                     &project_path,
                     &changed_path,
-                ) {
+                );
+                spinner_ai.finish_and_clear();
+
+                match resultado_analisis {
                     Ok(true) => {
                         if tests::ejecutar_tests(&test_path, &project_path).is_ok() {
                             let _ = docs::actualizar_documentacion(

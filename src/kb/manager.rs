@@ -28,8 +28,8 @@ impl KBManager {
         let mut indexer = CodeIndex::new_typescript();
 
         while let Some(update) = rx.recv().await {
-            let path = Path::new(&update.file_path);
-            if let Ok(symbols) = indexer.parse_file(path) {
+            let files = vec![update.file_path.clone()];
+            if let Ok(symbols) = indexer.update_files(&files) {
                 if symbols.is_empty() {
                     continue;
                 }

@@ -8,6 +8,7 @@ use clap::Parser;
 use commands::{Cli, Commands};
 
 // Módulos
+mod agents;
 mod ai;
 mod commands;
 mod config;

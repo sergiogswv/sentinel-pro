@@ -63,7 +63,7 @@ try {
 }
 
 # Crear directorio de instalación
-$installDir = "$env:USERPROFILE\.sentinel-rust"
+$installDir = "$env:USERPROFILE\.sentinel-pro"
 Show-Info "Creando directorio de instalación en $installDir..."
 if (-not (Test-Path $installDir)) {
     New-Item -ItemType Directory -Path $installDir -Force | Out-Null
@@ -71,8 +71,8 @@ if (-not (Test-Path $installDir)) {
 
 # Copiar el binario
 Show-Info "Instalando binario..."
-$binarySource = "target\release\sentinel-rust.exe"
-$binaryDest = "$installDir\sentinel.exe"
+$binarySource = "target\release\sentinel-pro.exe"
+$binaryDest = "$installDir\sentinel-pro.exe"
 
 if (-not (Test-Path $binarySource)) {
     Show-Error "No se encontró el binario compilado en $binarySource"
@@ -148,9 +148,9 @@ Write-Host ""
 Write-Host "3. Copia sentinel.toml a tu proyecto:" -ForegroundColor White
 Write-Host "   Copy-Item $configFile C:\ruta\a\tu\proyecto\" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "4. Ejecuta Sentinel en tu proyecto:" -ForegroundColor White
+Write-Host "4. Ejecuta Sentinel Pro en tu proyecto:" -ForegroundColor White
 Write-Host "   cd C:\ruta\a\tu\proyecto" -ForegroundColor Yellow
-Write-Host "   sentinel" -ForegroundColor Yellow
+Write-Host "   sentinel-pro" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "🎉 ¡Disfruta de Sentinel Rust!" -ForegroundColor Green
+Write-Host "🎉 ¡Disfruta de Sentinel Pro!" -ForegroundColor Green
 Write-Host ""
