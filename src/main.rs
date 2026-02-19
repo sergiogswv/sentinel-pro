@@ -16,6 +16,7 @@ mod docs;
 mod files;
 mod git;
 mod kb;
+mod ml;
 mod rules;
 mod stats;
 mod tests;

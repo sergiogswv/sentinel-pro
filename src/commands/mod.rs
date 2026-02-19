@@ -72,4 +72,20 @@ pub enum ProCommands {
         /// Archivo a optimizar
         file: String,
     },
+    /// Gestión de modelos de ML Local
+    Ml {
+        #[command(subcommand)]
+        subcommand: MlCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum MlCommands {
+    /// Descarga y prepara los modelos locales
+    Download,
+    /// Prueba la generación de embeddings
+    Test {
+        /// Texto a procesar
+        text: String,
+    },
 }

@@ -67,18 +67,18 @@ Enfoque: Inteligencia autónoma especializada.
 Estado: 📅 PENDIENTE
 Enfoque: Privacidad y velocidad sin nube.
 
-- [ ] **4.1 Sistema de Embeddings Local**
-  - [ ] Integración de `candle-transformers` (CodeBERT).
-  - [ ] Pipeline de generación de embeddings offline.
+- [x] **4.1 Sistema de Embeddings Local**
+  - [x] Integración de `candle-transformers` (CodeBERT/All-MiniLM).
+  - [x] Pipeline de generación de embeddings offline (Optimización).
 
-- [ ] **4.2 Modelos ONNX (Inferencia Local)**
-  - [ ] Integración de `ort` (ONNX Runtime).
-  - [ ] Implementación de Bug Predictor.
-  - [ ] Implementación de Complexity Scoring.
+- [x] **4.2 Modelos ONNX (Inferencia Local)**
+  - [x] Integración de `candle-onnx` (Stub por falta de `protoc` en Windows).
+  - [x] Implementación de estructura Bug Predictor.
+  - [x] Implementación de estructura Complexity Scoring.
 
-- [ ] **4.3 Detección de Patrones**
-  - [ ] Analizador de estilos de código.
-  - [ ] Generación automática de `Code Style Profile`.
+- [x] **4.3 Detección de Patrones**
+  - [x] Analizador de estilos de código (Indentación, Comillas, Semicolons).
+  - [x] Generación automática de `Code Style Profile`.
 
 ## Fase 5: Interfaz Pro y Comandos Interactivos
 Estado: 📅 PENDIENTE

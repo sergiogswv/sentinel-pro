@@ -24,8 +24,20 @@ tree-sitter = "0.26.5"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-javascript = "0.25.0"
 qdrant-client = "1.10.1"
-uuid = { version = "1.21.0", features = ["v4"] }
+uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
 async-trait = "0.1.89"
+
+# Machine Learning Local (Pinned for compatibility)
+candle-core = "0.3.3"
+candle-nn = "0.3.3"
+candle-transformers = "0.3.3"
+tokenizers = "0.15.0"
+hf-hub = "0.3.2"
+
+# Dependency Alignment
+rand = "0.8.5"
+rand_distr = "0.4.3"
+half = { version = "=2.3.1", features = ["num-traits", "use-intrinsics", "rand_distr"] }
 
 [dev-dependencies]
 tempfile = "3.10"

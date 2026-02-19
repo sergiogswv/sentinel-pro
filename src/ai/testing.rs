@@ -4,7 +4,7 @@
 //! valida sus configuraciones y sugiere alternativas apropiadas basadas
 //! en el framework principal detectado.
 
-use crate::ai::client::{consultar_ia, TaskType};
+use crate::ai::client::{TaskType, consultar_ia};
 use crate::config::SentinelConfig;
 use crate::stats::SentinelStats;
 use colored::*;
@@ -266,6 +266,7 @@ fn parsear_testing_info(respuesta: &str) -> anyhow::Result<TestingFrameworkInfo>
 // Función eliminada - Los comandos de instalación ahora son generados dinámicamente por la IA
 
 /// Obtiene sugerencias complementarias para un proyecto que ya tiene testing configurado
+#[allow(dead_code)]
 pub fn obtener_sugerencias_complementarias(
     project_path: &Path,
     config: &SentinelConfig,

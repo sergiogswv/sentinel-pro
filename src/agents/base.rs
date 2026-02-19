@@ -1,10 +1,10 @@
+use crate::config::SentinelConfig;
+use crate::kb::ContextBuilder;
+use crate::stats::SentinelStats;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use crate::config::SentinelConfig;
-use crate::stats::SentinelStats;
-use crate::kb::ContextBuilder;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
@@ -44,8 +44,9 @@ pub struct AgentContext {
 #[async_trait]
 pub trait Agent: Send + Sync {
     fn name(&self) -> &str;
+    #[allow(dead_code)]
     fn description(&self) -> &str;
-    
+
     /// Ejecuta una tarea asignada al agente
     async fn execute(&self, task: &Task, context: &AgentContext) -> anyhow::Result<TaskResult>;
 }

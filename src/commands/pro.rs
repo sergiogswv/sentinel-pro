@@ -19,7 +19,9 @@ pub fn handle_pro_command(subcommand: ProCommands) {
     // Inicializar recursos necesarios para los agentes
     let project_root = env::current_dir().expect("No se pudo obtener el directorio actual");
     let config = SentinelConfig::load(&project_root).unwrap_or_default();
-    let stats = Arc::new(Mutex::new(SentinelStats::cargar(env::current_dir().unwrap().as_path())));
+    let stats = Arc::new(Mutex::new(SentinelStats::cargar(
+        env::current_dir().unwrap().as_path(),
+    )));
 
     // Inicializar KB Context Builder
     let context_builder = if let Some(kb_config) = &config.knowledge_base {
@@ -27,8 +29,11 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             Ok(db) => {
                 // Usamos el modelo primario para embeddings por defecto
                 // Idealmente deberíamos tener una configuración específica para embeddings
-                Some(Arc::new(ContextBuilder::new(db, config.primary_model.clone())))
-            },
+                Some(Arc::new(ContextBuilder::new(
+                    db,
+                    config.primary_model.clone(),
+                )))
+            }
             Err(_) => None,
         }
     } else {
@@ -55,7 +60,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
     match subcommand {
         ProCommands::Analyze { file } => {
             let pb = ui::crear_progreso(&format!("Analizando {} con ReviewerAgent...", file));
-            
+
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
                 description: format!("Analiza el archivo {} y reporta problemas.", file),
@@ -64,10 +69,11 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 context: None, // Futuro: Leer contenido del archivo aquí
             };
 
-            let result = rt.block_on(orchestrator.execute_task("ReviewerAgent", &task, &agent_context));
-            
+            let result =
+                rt.block_on(orchestrator.execute_task("ReviewerAgent", &task, &agent_context));
+
             pb.finish_and_clear();
-            
+
             match result {
                 Ok(res) => {
                     println!("{}", "🔍 ANÁLISIS COMPLETADO".bold().green());
@@ -80,7 +86,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
         }
         ProCommands::Generate { file } => {
             let pb = ui::crear_progreso(&format!("Generando código para {}...", file));
-            
+
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
                 description: format!("Genera el código necesario para el archivo {}.", file),
@@ -89,18 +95,19 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 context: None,
             };
 
-            let result = rt.block_on(orchestrator.execute_task("CoderAgent", &task, &agent_context));
-            
+            let result =
+                rt.block_on(orchestrator.execute_task("CoderAgent", &task, &agent_context));
+
             pb.finish_and_clear();
-             
-             match result {
+
+            match result {
                 Ok(res) => {
                     println!("{}", "🚀 CÓDIGO GENERADO".bold().green());
                     // Mostrar artifacts (código extraído)
                     for artifact in res.artifacts {
-                         println!("\n{}\n", artifact);
+                        println!("\n{}\n", artifact);
                     }
-                    
+
                     println!("{}", "\n📝 Explicación detallada:".bold());
                     println!("{}", res.output);
                 }
@@ -110,29 +117,33 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             }
         }
         ProCommands::Refactor { file } => {
-             let pb = ui::crear_progreso(&format!("Refactorizando {}...", file));
-            
+            let pb = ui::crear_progreso(&format!("Refactorizando {}...", file));
+
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
-                description: format!("Refactoriza el archivo {} para mejorar legibilidad y estructura.", file),
+                description: format!(
+                    "Refactoriza el archivo {} para mejorar legibilidad y estructura.",
+                    file
+                ),
                 task_type: TaskType::Refactor,
                 file_path: Some(std::path::PathBuf::from(&file)),
                 context: None,
             };
 
-            let result = rt.block_on(orchestrator.execute_task("RefactorAgent", &task, &agent_context));
-            
+            let result =
+                rt.block_on(orchestrator.execute_task("RefactorAgent", &task, &agent_context));
+
             pb.finish_and_clear();
 
             match result {
                 Ok(res) => {
                     println!("{}", "🛠️ REFACTORIZACIÓN COMPLETADA".bold().green());
                     for artifact in res.artifacts {
-                         println!("\n{}\n", artifact);
+                        println!("\n{}\n", artifact);
                     }
                 }
                 Err(e) => {
-                     println!("{} {}", "❌ Error al refactorizar:".bold().red(), e);
+                    println!("{} {}", "❌ Error al refactorizar:".bold().red(), e);
                 }
             }
         }
@@ -156,17 +167,18 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 context: None,
             };
 
-            let result = rt.block_on(orchestrator.execute_task("TesterAgent", &task, &agent_context));
+            let result =
+                rt.block_on(orchestrator.execute_task("TesterAgent", &task, &agent_context));
             pb.finish_with_message("🧪 Asistente de Pruebas finalizado.");
 
-             match result {
+            match result {
                 Ok(res) => {
                     println!("{}", "🧪 PLAN DE PRUEBAS GENERADO".bold().green());
                     // Mostrar artifacts (código extraído)
                     for artifact in res.artifacts {
-                         println!("\n{}\n", artifact);
+                        println!("\n{}\n", artifact);
                     }
-                    
+
                     println!("{}", "\n📝 Detalles:".bold());
                     println!("{}", res.output);
                 }
@@ -175,6 +187,41 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
             }
         }
+        ProCommands::Ml { subcommand } => match subcommand {
+            crate::commands::MlCommands::Download => {
+                println!(
+                    "{}",
+                    "📥 Descargando modelo de embeddings local (all-MiniLM-L6-v2)...".cyan()
+                );
+                let start = std::time::Instant::now();
+                match crate::ml::embeddings::EmbeddingModel::new() {
+                    Ok(_) => {
+                        let duration = start.elapsed();
+                        println!(
+                            "{} ({}s)",
+                            "✅ Modelo descargado y verificado correctamente.".green(),
+                            duration.as_secs()
+                        );
+                    }
+                    Err(e) => println!("{} {}", "❌ Error al descargar modelo:".red(), e),
+                }
+            }
+            crate::commands::MlCommands::Test { text } => {
+                println!("{}", "🧠 Generando embeddings de prueba...".cyan());
+                match crate::ml::embeddings::EmbeddingModel::new() {
+                    Ok(model) => match model.embed_one(&text) {
+                        Ok(emb) => {
+                            println!("{}", "✅ Operación exitosa.".green());
+                            println!("   📝 Texto: \"{}\"", text);
+                            println!("   📊 Dimensión: {}", emb.len());
+                            println!("   🔢 Vector [0..5]: {:?}", &emb[0..5]);
+                        }
+                        Err(e) => println!("{} {}", "❌ Error al generar embedding:".red(), e),
+                    },
+                    Err(e) => println!("{} {}", "❌ Error al cargar modelo:".red(), e),
+                }
+            }
+        },
         _ => {
             println!("⚠️  Comando Pro en desarrollo.");
         }

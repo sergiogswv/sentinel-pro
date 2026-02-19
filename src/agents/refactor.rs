@@ -1,5 +1,5 @@
 use crate::agents::base::{Agent, AgentContext, Task, TaskResult};
-use crate::ai::client::{consultar_ia_dinamico, TaskType};
+use crate::ai::client::{TaskType, consultar_ia_dinamico};
 use crate::ai::utils::extraer_codigo;
 use async_trait::async_trait;
 use colored::*;
@@ -12,7 +12,12 @@ impl RefactorAgent {
         Self
     }
 
-    fn build_prompt(&self, task: &Task, context: &AgentContext, rag_context: Option<&str>) -> String {
+    fn build_prompt(
+        &self,
+        task: &Task,
+        context: &AgentContext,
+        rag_context: Option<&str>,
+    ) -> String {
         let framework = &context.config.framework;
         let language = &context.config.code_language;
         let mut prompt = format!(
@@ -24,11 +29,7 @@ impl RefactorAgent {
             CONTEXTO DEL PROYECTO:\n\
             - Framework: {}\n\
             - Lenguaje: {}\n",
-            framework,
-            language,
-            task.description,
-            framework,
-            language
+            framework, language, task.description, framework, language
         );
 
         if let Some(ctx) = rag_context {
@@ -46,7 +47,6 @@ impl RefactorAgent {
             3. Si es necesario, divide el código en funciones o clases más pequeñas.\n\
             4. Mejora el nombrado de variables y funciones para que sea autodocumentado.\n\
             5. Mantén la consistencia con el estilo del framework.\n\n\
-            
             FORMATO DE RESPUESTA:\n\
             1. Breve análisis de los problemas encontrados.\n\
             2. Explicación de las mejoras aplicadas.\n\
@@ -78,7 +78,7 @@ impl Agent for RefactorAgent {
                 Ok(ctx) => {
                     rag_context = ctx;
                     println!("{}", " OK".green());
-                },
+                }
                 Err(e) => {
                     println!("{}", " Error".red());
                     eprintln!("      Error consultando KB: {}", e);
@@ -86,7 +86,11 @@ impl Agent for RefactorAgent {
             }
         }
 
-        let prompt_context = if rag_context.is_empty() { None } else { Some(rag_context.as_str()) };
+        let prompt_context = if rag_context.is_empty() {
+            None
+        } else {
+            Some(rag_context.as_str())
+        };
         let prompt = self.build_prompt(task, context, prompt_context);
 
         let config_clone = context.config.clone();

@@ -1,6 +1,5 @@
 use crate::agents::base::{Agent, AgentContext, Task, TaskResult};
-use crate::ai::client::{consultar_ia_dinamico, TaskType};
-use crate::ai::utils::eliminar_bloques_codigo;
+use crate::ai::client::{TaskType, consultar_ia_dinamico};
 use async_trait::async_trait;
 use colored::*;
 use std::sync::Arc;
@@ -12,7 +11,12 @@ impl ReviewerAgent {
         Self
     }
 
-    fn build_prompt(&self, task: &Task, context: &AgentContext, rag_context: Option<&str>) -> String {
+    fn build_prompt(
+        &self,
+        task: &Task,
+        context: &AgentContext,
+        rag_context: Option<&str>,
+    ) -> String {
         let framework = &context.config.framework;
         let language = &context.config.code_language;
         let mut prompt = format!(
@@ -22,11 +26,7 @@ impl ReviewerAgent {
             CONTEXTO DEL PROYECTO:\n\
             - Framework: {}\n\
             - Lenguaje: {}\n",
-            framework,
-            language,
-            task.description,
-            framework,
-            language
+            framework, language, task.description, framework, language
         );
 
         if let Some(ctx) = rag_context {
@@ -44,11 +44,10 @@ impl ReviewerAgent {
             3. legibilidad y mantenimiento (Clean Code).\n\
             4. Patrones de diseño adecuados para el framework.\n\
             5. Manejo de errores.\n\n\
-            
             FORMATO DE RESPUESTA:\n\
             - Inicia con un resumen ejecutivo (Aprobado/Requiere Cambios).\n\
             - Lista los hallazgos clasificados por severidad (Alta, Media, Baja).\n\
-            - Proporciona ejemplos de código corregido si es necesario.\n"
+            - Proporciona ejemplos de código corregido si es necesario.\n",
         );
 
         prompt
@@ -66,7 +65,10 @@ impl Agent for ReviewerAgent {
     }
 
     async fn execute(&self, task: &Task, context: &AgentContext) -> anyhow::Result<TaskResult> {
-        println!("   🧐 ReviewerAgent: Revisando tarea '{}'...", task.description);
+        println!(
+            "   🧐 ReviewerAgent: Revisando tarea '{}'...",
+            task.description
+        );
 
         // Intentar obtener contexto relevante de la Knowledge Base
         let mut rag_context = String::new();
@@ -76,7 +78,7 @@ impl Agent for ReviewerAgent {
                 Ok(ctx) => {
                     rag_context = ctx;
                     println!("{}", " OK".green());
-                },
+                }
                 Err(e) => {
                     println!("{}", " Error".red());
                     eprintln!("      Error consultando KB: {}", e);
@@ -84,7 +86,11 @@ impl Agent for ReviewerAgent {
             }
         }
 
-        let prompt_context = if rag_context.is_empty() { None } else { Some(rag_context.as_str()) };
+        let prompt_context = if rag_context.is_empty() {
+            None
+        } else {
+            Some(rag_context.as_str())
+        };
         let prompt = self.build_prompt(task, context, prompt_context);
 
         let config_clone = context.config.clone();
@@ -106,7 +112,7 @@ impl Agent for ReviewerAgent {
         // Pero en este caso, el usuario probablemente quiera ver todo.
         // Usaremos `eliminar_bloques_codigo` solo si quisiéramos un resumen muy corto.
         // Aquí devolvemos la respuesta completa.
-        
+
         Ok(TaskResult {
             success: true,
             output: response,

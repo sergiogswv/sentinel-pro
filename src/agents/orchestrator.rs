@@ -1,7 +1,7 @@
 use crate::agents::base::{Agent, AgentContext, Task, TaskResult};
+use anyhow::anyhow;
 use std::collections::HashMap;
 use std::sync::Arc;
-use anyhow::anyhow;
 
 pub struct AgentOrchestrator {
     agents: HashMap<String, Arc<dyn Agent>>,
@@ -24,15 +24,24 @@ impl AgentOrchestrator {
         self.agents.get(name).cloned()
     }
 
-    pub async fn execute_task(&self, agent_name: &str, task: &Task, context: &AgentContext) -> anyhow::Result<TaskResult> {
+    pub async fn execute_task(
+        &self,
+        agent_name: &str,
+        task: &Task,
+        context: &AgentContext,
+    ) -> anyhow::Result<TaskResult> {
         if let Some(agent) = self.get_agent(agent_name) {
-            println!("   🚀 Ejecutando tarea '{}' con agente: {}", task.description, agent_name);
+            println!(
+                "   🚀 Ejecutando tarea '{}' con agente: {}",
+                task.description, agent_name
+            );
             agent.execute(task, context).await
         } else {
             Err(anyhow!("Agente '{}' no encontrado", agent_name))
         }
     }
 
+    #[allow(dead_code)]
     pub fn list_agents(&self) -> Vec<String> {
         self.agents.keys().cloned().collect()
     }

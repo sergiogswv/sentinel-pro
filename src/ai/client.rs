@@ -366,6 +366,13 @@ pub fn obtener_embeddings(
         "openai" | "lm-studio" => {
             obtener_embeddings_openai(&client, textos, &model.api_key, &model.url, &model.name)
         }
+        "local" => {
+            // Nota: Esto carga el modelo cada vez. Para indexación masiva deberíamos
+            // instanciar EmbeddingModel una vez y reutilizarlo en capas superiores.
+            // Por ahora, funciona para consultas esporádicas.
+            let embedding_model = crate::ml::embeddings::EmbeddingModel::new()?;
+            embedding_model.embed(&textos)
+        }
         _ => Err(anyhow::anyhow!(
             "El proveedor {} no soporta embeddings actualmente",
             model.provider
