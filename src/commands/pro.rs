@@ -12,8 +12,7 @@ use crate::ui;
 use colored::*;
 use std::env;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+
 
 pub fn handle_pro_command(subcommand: ProCommands) {
     // Inicializar recursos necesarios para los agentes
@@ -61,12 +60,22 @@ pub fn handle_pro_command(subcommand: ProCommands) {
         ProCommands::Analyze { file } => {
             let pb = ui::crear_progreso(&format!("Analizando {} con ReviewerAgent...", file));
 
+            // Leer contenido del archivo
+            let content = match std::fs::read_to_string(&file) {
+                Ok(c) => c,
+                Err(e) => {
+                    pb.finish_and_clear();
+                    println!("{} {}", "❌ Error al leer archivo:".bold().red(), e);
+                    return;
+                }
+            };
+
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
                 description: format!("Analiza el archivo {} y reporta problemas.", file),
                 task_type: TaskType::Analyze,
                 file_path: Some(std::path::PathBuf::from(&file)),
-                context: None, // Futuro: Leer contenido del archivo aquí
+                context: Some(content),
             };
 
             let result =
@@ -87,12 +96,15 @@ pub fn handle_pro_command(subcommand: ProCommands) {
         ProCommands::Generate { file } => {
             let pb = ui::crear_progreso(&format!("Generando código para {}...", file));
 
+            // Intentar leer contenido si existe (para contexto)
+            let content = std::fs::read_to_string(&file).ok();
+
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
                 description: format!("Genera el código necesario para el archivo {}.", file),
                 task_type: TaskType::Generate,
                 file_path: Some(std::path::PathBuf::from(&file)),
-                context: None,
+                context: content,
             };
 
             let result =
@@ -103,9 +115,13 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             match result {
                 Ok(res) => {
                     println!("{}", "🚀 CÓDIGO GENERADO".bold().green());
-                    // Mostrar artifacts (código extraído)
-                    for artifact in res.artifacts {
-                        println!("\n{}\n", artifact);
+                    
+                    // Si hay artifacts, guardarlos en el archivo
+                    if let Some(code) = res.artifacts.first() {
+                         match std::fs::write(&file, code) {
+                            Ok(_) => println!("   💾 Archivo guardado: {}", file.cyan()),
+                            Err(e) => println!("   ⚠️  No se pudo guardar el archivo: {}", e),
+                         }
                     }
 
                     println!("{}", "\n📝 Explicación detallada:".bold());
@@ -117,7 +133,24 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             }
         }
         ProCommands::Refactor { file } => {
+            // Leer contenido original
+            let content = match std::fs::read_to_string(&file) {
+                Ok(c) => c,
+                Err(e) => {
+                    println!("{} {}", "❌ Error al leer archivo:".bold().red(), e);
+                    return;
+                }
+            };
+
             let pb = ui::crear_progreso(&format!("Refactorizando {}...", file));
+
+            // Crear Backup
+            let backup_path = format!("{}.bak", file);
+            if let Err(e) = std::fs::copy(&file, &backup_path) {
+                 pb.finish_and_clear();
+                 println!("{} {}", "❌ Error al crear backup:".bold().red(), e);
+                 return;
+            }
 
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -127,7 +160,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 ),
                 task_type: TaskType::Refactor,
                 file_path: Some(std::path::PathBuf::from(&file)),
-                context: None,
+                context: Some(content),
             };
 
             let result =
@@ -138,9 +171,18 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             match result {
                 Ok(res) => {
                     println!("{}", "🛠️ REFACTORIZACIÓN COMPLETADA".bold().green());
-                    for artifact in res.artifacts {
-                        println!("\n{}\n", artifact);
+                    println!("   🔙 Backup creado en: {}", backup_path.dimmed());
+
+                    if let Some(code) = res.artifacts.first() {
+                         match std::fs::write(&file, code) {
+                            Ok(_) => println!("   💾 Cambios aplicados a: {}", file.cyan()),
+                            Err(e) => println!("   ⚠️  No se pudo escribir el archivo: {}", e),
+                         }
+                    } else {
+                        println!("   ⚠️  El agente no retornó código válido para reemplazar.");
                     }
+                    
+                    println!("\n{}", res.output);
                 }
                 Err(e) => {
                     println!("{} {}", "❌ Error al refactorizar:".bold().red(), e);
@@ -148,23 +190,252 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             }
         }
         ProCommands::Fix { file } => {
-            let pb = ui::crear_progreso(&format!("Buscando solución para {}...", file));
-            thread::sleep(Duration::from_secs(2));
-            pb.finish_with_message(format!(
-                "🩹 {} {}",
-                "Bugs corregidos en:".bold(),
-                file.cyan()
-            ));
-            println!("⚠️  FixCommand pendiente de integración con Agents.");
+             // Leer contenido original
+            let content = match std::fs::read_to_string(&file) {
+                Ok(c) => c,
+                Err(e) => {
+                    println!("{} {}", "❌ Error al leer archivo:".bold().red(), e);
+                    return;
+                }
+            };
+
+            let pb = ui::crear_progreso(&format!("Corrigiendo bugs en {}...", file));
+
+             // Crear Backup
+             let backup_path = format!("{}.bak", file);
+             let _ = std::fs::copy(&file, &backup_path);
+
+            let task = Task {
+                id: uuid::Uuid::new_v4().to_string(),
+                description: format!("Identifica y corrige bugs en el archivo {}.", file),
+                task_type: TaskType::Fix,
+                file_path: Some(std::path::PathBuf::from(&file)),
+                context: Some(content),
+            };
+            
+            // Usamos CoderAgent para fixes por ahora
+            let result =
+                rt.block_on(orchestrator.execute_task("CoderAgent", &task, &agent_context));
+
+            pb.finish_and_clear();
+
+            match result {
+                Ok(res) => {
+                    println!("{}", "🩹 BUGS CORREGIDOS".bold().green());
+                     if let Some(code) = res.artifacts.first() {
+                         match std::fs::write(&file, code) {
+                            Ok(_) => println!("   💾 Correcciones aplicadas a: {}", file.cyan()),
+                            Err(e) => println!("   ⚠️  No se pudo escribir el archivo: {}", e),
+                         }
+                    }
+                    println!("\n{}", res.output);
+                }
+                Err(e) => {
+                    println!("{} {}", "❌ Error al corregir:".bold().red(), e);
+                }
+            }
+        }
+    ProCommands::Chat => {
+            println!("{}", "💬 Sentinel Pro Chat".bold().blue());
+            println!("{}", "Escribe 'exit' o 'quit' para salir.\n".dimmed());
+
+            use std::io::{self, Write};
+            
+            // Historial simple en memoria para la sesión
+            let mut conversation_history = String::new();
+            
+            loop {
+                print!("{}", "You > ".bold().green());
+                io::stdout().flush().unwrap();
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input).unwrap();
+                let input = input.trim();
+
+                if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
+                    break;
+                }
+                
+                if input.is_empty() { continue; }
+
+                // Mostrar indicador de pensamiento
+                print!("{}", "   Thinking...".dimmed());
+                io::stdout().flush().unwrap();
+                
+                // Construir prompt con historial
+                let prompt = if conversation_history.is_empty() {
+                    format!("Eres un asistente experto en programación y en este proyecto. Responde a: {}", input)
+                } else {
+                    format!("{}\nUser: {}\nAssistant: Responde corto y conciso.", conversation_history, input)
+                };
+
+                let config_clone = agent_context.config.clone();
+                let stats_clone = Arc::clone(&agent_context.stats);
+                let project_root = agent_context.project_root.clone();
+
+                let response_result = crate::ai::client::consultar_ia_dinamico(
+                        prompt, 
+                        crate::ai::client::TaskType::Deep, // Usar Deep para mejor razonamiento en chat
+                        &config_clone, 
+                        stats_clone, 
+                        &project_root
+                    );
+                
+                // Envolver en Ok(Ok(...)) para coincidir con el match de abajo que espera Result<Result<...>>
+                // o simplificar el match
+                let response_result: anyhow::Result<anyhow::Result<String>> = Ok(response_result);
+                
+                // Borrar indicador "Thinking..." (retorno de carro + espacios)
+                print!("\r               \r");
+                
+                match response_result {
+                    Ok(Ok(response)) => {
+                        print!("{}", "Sentinel > ".bold().blue());
+                        println!("{}\n", response);
+                        // Limitar historial para no exceder tokens infinitamente
+                        if conversation_history.len() > 4000 {
+                            conversation_history = conversation_history.split_off(conversation_history.len() / 2);
+                        }
+                        conversation_history.push_str(&format!("\nUser: {}\nAssistant: {}", input, response));
+                    }
+                    Ok(Err(e)) => println!("{}", format!("Error: {}", e).red()),
+                    Err(e) => println!("{}", format!("System Error: {}", e).red()),
+                }
+            }
+        }
+        ProCommands::Docs { dir } => {
+             let pb = ui::crear_progreso(&format!("Generando documentación para {}...", dir));
+             
+             // Simplificado: Listar archivos y pedir un README general
+             let path = std::path::PathBuf::from(&dir);
+             if !path.exists() {
+                 pb.finish_and_clear();
+                 println!("{}", "❌ El directorio no existe.".red());
+                 return;
+             }
+
+             // Recolectar nombres de archivos para dar contexto de estructura
+             let mut structure = String::new();
+             if let Ok(entries) = std::fs::read_dir(&path) {
+                 for entry in entries.flatten() {
+                     if let Ok(name) = entry.file_name().into_string() {
+                         structure.push_str(&format!("- {}\n", name));
+                     }
+                 }
+             }
+
+             let task = Task {
+                id: uuid::Uuid::new_v4().to_string(),
+                description: format!("Genera una documentación técnica (README.md) detallada para el directorio '{}' que contiene los siguientes archivos:\n{}", dir, structure),
+                task_type: TaskType::Generate, // Reusamos Generate
+                file_path: Some(path.clone()),
+                context: Some(format!("Estructura de archivos:\n{}", structure)),
+            };
+
+            let result =
+                rt.block_on(orchestrator.execute_task("CoderAgent", &task, &agent_context));
+            
+            pb.finish_and_clear();
+            
+             match result {
+                Ok(res) => {
+                    println!("{}", "📚 DOCUMENTACIÓN GENERADA".bold().green());
+                    if let Some(doc_content) = res.artifacts.first() {
+                         let doc_path = path.join("PROJECT_DOCS.md");
+                         match std::fs::write(&doc_path, doc_content) {
+                            Ok(_) => println!("   💾 Documentación guardada en: {}", doc_path.display().to_string().cyan()),
+                            Err(e) => println!("   ⚠️  No se pudo guardar el archivo: {}", e),
+                         }
+                    }
+                    println!("\n{}", res.output);
+                }
+                Err(e) => {
+                    println!("{} {}", "❌ Error al documentar:".bold().red(), e);
+                }
+            }
         }
         ProCommands::TestAll => {
             let pb = ui::crear_progreso("Ejecutando asistente de pruebas...");
+            
+            // 1. Escaneo Inteligente de Archivos sin Test
+            let mut archivos_sin_test = Vec::new();
+            let src_path = agent_context.project_root.join("src"); // Asumimos convention src/
+            
+            if src_path.exists() {
+                // Buscar recursivamente
+                let walker = ignore::WalkBuilder::new(&src_path)
+                    .hidden(false)
+                    .git_ignore(true)
+                    .build();
+                
+                for result in walker {
+                    if let Ok(entry) = result {
+                         // ignore::DirEntry
+                         let entry: ignore::DirEntry = entry;
+                         let path = entry.path();
+                        
+                        // Verificar si es archivo
+                        if !path.is_file() {
+                             continue;
+                        }
+                        
+                        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+                        
+                        // Filtrar por extensiones configuradas
+                        let ext_opt = path.extension().and_then(|e| e.to_str());
+                        let ext = ext_opt.unwrap_or("").to_string();
+                        if !agent_context.config.file_extensions.contains(&ext) {
+                            continue;
+                        }
+                        
+                        // Ignorar archivos de test existentes
+                        if file_name.ends_with(".spec.ts") 
+                           || file_name.ends_with(".test.ts") 
+                           || file_name.ends_with("_test.go") 
+                           || file_name.ends_with(".test.js") {
+                            continue;
+                        }
+
+                        // Verificar si tiene test
+                        let base_name = file_name.split('.').next().unwrap_or(&file_name).to_string();
+                        
+                        let test_exists = crate::files::buscar_archivo_test(
+                            &base_name, 
+                            &agent_context.project_root, 
+                            &agent_context.config.test_patterns
+                        ).is_some();
+
+                        if !test_exists {
+                            if let Ok(rel) = path.strip_prefix(&agent_context.project_root) {
+                                archivos_sin_test.push(rel.display().to_string());
+                            } else {
+                                archivos_sin_test.push(path.display().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Limitar la lista para no exceder tokens
+            let total_missing = archivos_sin_test.len();
+            archivos_sin_test.truncate(20); 
+            
+            let context_msg = if archivos_sin_test.is_empty() {
+                "No se detectaron archivos fuente obvios sin tests en src/ (o el proyecto tiene una estructura diferente).".to_string()
+            } else {
+                format!(
+                    "Se detectaron {} archivos que NO parecen tener tests asociados.\nLista de prioridad (Top 20):\n- {}",
+                    total_missing,
+                    archivos_sin_test.join("\n- ")
+                )
+            };
+
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
-                description: "Analiza el proyecto y genera un plan de pruebas unitarias para los componentes más críticos. Sugiere código para el test más importante.".to_string(),
+                description: "Analiza el proyecto y genera un plan de pruebas unitarias priorizado. Enfócate en los archivos listados que no tienen cobertura.".to_string(),
                 task_type: TaskType::Test,
                 file_path: None,
-                context: None,
+                context: Some(context_msg),
             };
 
             let result =
@@ -222,8 +493,315 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
             }
         },
-        _ => {
-            println!("⚠️  Comando Pro en desarrollo.");
+        ProCommands::Workflow { name, file } => {
+             use crate::agents::workflow::{Workflow, WorkflowStep, TaskTemplate, WorkflowEngine};
+             
+             let pb = ui::crear_progreso(&format!("Preparando workflow '{}'...", name));
+             
+             // --- WORKFLOWS DEFINIDOS (Hardcoded por ahora, luego .yaml) ---
+             let workflow = match name.as_str() {
+                 "fix-and-verify" => Some(Workflow {
+                     name: "Fix & Verify".to_string(),
+                     description: "Intenta arreglar un bug y luego verifica con tests.".to_string(),
+                     steps: vec![
+                         WorkflowStep {
+                             name: "Identificar y Corregir Bugs".to_string(),
+                             agent: "CoderAgent".to_string(),
+                             task_template: TaskTemplate {
+                                 description: "Analiza el archivo {file} en busca de bugs lógicos o de sintaxis. Si encuentras errores, corrígelos y devuelve el código completo corregido.".to_string(),
+                                 task_type: TaskType::Fix,
+                             },
+                         },
+                         WorkflowStep {
+                             name: "Refactorizar para Calidad".to_string(),
+                             agent: "RefactorAgent".to_string(),
+                             task_template: TaskTemplate {
+                                 description: "Toma el código del paso anterior (si hubo cambios) o del archivo {file}. Mejora su legibilidad y estructura aplicando Clean Code, sin romper la lógica corregida.".to_string(),
+                                 task_type: TaskType::Refactor,
+                             },
+                         },
+                         WorkflowStep {
+                             name: "Verificar con Plan de Pruebas".to_string(),
+                             agent: "TesterAgent".to_string(),
+                             task_template: TaskTemplate {
+                                 description: "Genera un plan de pruebas unitarias para el código resultante del paso anterior (fichero {file}). Asegúrate de cubrir los casos de borde de los bugs corregidos.".to_string(),
+                                 task_type: TaskType::Test,
+                             },
+                         },
+                     ],
+                 }),
+                 "review-security" => Some(Workflow {
+                     name: "Security Auditing".to_string(),
+                     description: "Análisis de seguridad profundo.".to_string(),
+                     steps: vec![
+                         WorkflowStep {
+                             name: "Análisis de Seguridad Estático".to_string(),
+                             agent: "ReviewerAgent".to_string(),
+                             task_template: TaskTemplate {
+                                 description: "Realiza una auditoría de seguridad OWASP Top 10 sobre el archivo {file}. Enfócate solo en vulnerabilidades críticas.".to_string(),
+                                 task_type: TaskType::Analyze,
+                             },
+                         },
+                         WorkflowStep {
+                             name: "Sugerencia de Mitigación".to_string(),
+                             agent: "CoderAgent".to_string(),
+                             task_template: TaskTemplate {
+                                 description: "Basado en el análisis de seguridad anterior, sugiere código seguro para mitigar las vulnerabilidades encontradas en {file}.".to_string(),
+                                 task_type: TaskType::Generate,
+                             },
+                         },
+                     ]
+                 }),
+                 _ => None,
+             };
+             
+             if let Some(wf) = workflow {
+                 pb.finish_with_message("Workflow cargado.");
+                 let engine = WorkflowEngine::new(orchestrator); // Movemos orchestrator aquí
+                 
+                 let result = rt.block_on(engine.execute_workflow(&wf, &agent_context, file));
+                 
+                 match result {
+                     Ok(ctx) => {
+                         println!("{}", "\n✨ WORKFLOW COMPLETADO".bold().green());
+                         println!("   📄 Archivo final: {:?}", ctx.current_file);
+                         println!("   🔄 Pasos ejecutados: {}", ctx.step_results.len());
+                     }
+                     Err(e) => {
+                         println!("{} {}", "❌ Error en workflow:".bold().red(), e);
+                     }
+                 }
+                 
+             } else {
+                 pb.finish_and_clear();
+                 println!("{} Workflow '{}' no encontrado.", "❌".red(), name);
+                 println!("   Workflows disponibles: fix-and-verify, review-security");
+             }
+        }
+        ProCommands::Migrate { src, dst } => {
+            let pb = ui::crear_progreso(&format!("Migrando {} a {}...", src, dst));
+            
+            // 1. Leer archivo origen
+            let content = match std::fs::read_to_string(&src) {
+                Ok(c) => c,
+                Err(e) => {
+                     pb.finish_and_clear();
+                     println!("{} {}", "❌ Error al leer archivo origen:".bold().red(), e);
+                     return;
+                }
+            };
+
+            // 2. Construir tarea de migración
+            let task = Task {
+                id: uuid::Uuid::new_v4().to_string(),
+                description: format!(
+                    "TU TAREA ES MIGRAR CÓDIGO.\n\
+                    ORIGEN: Archivo '{}'\n\
+                    DESTINO: Framework '{}'\n\n\
+                    OBJETIVO: Reescribe el código fuente completamente para que funcione en el framework destino.\n\
+                    REGLAS:\n\
+                    1. ADAPTA la estructura (ej: de funciones Express a Clases NestJS con Decoradores).\n\
+                    2. MANTÉN la lógica de negocio intacta.\n\
+                    3. Si el destino es 'nestjs', usa Inyección de Dependencias, DTOs y Decoradores (@Controller, @Get).\n\
+                    4. Si el destino es 'react', migra a Functional Components con Hooks.\n\
+                    5. Genera todo el código necesario (imports, clase, export).", 
+                    src, dst
+                ),
+                task_type: TaskType::Generate, // Generate es más apropiado que Refactor para cambios drásticos
+                file_path: Some(std::path::PathBuf::from(&src)),
+                context: Some(format!("CÓDIGO A MIGRAR:\n{}", content)),
+            };
+
+            // 3. Ejecutar agente
+            let result =
+                rt.block_on(orchestrator.execute_task("CoderAgent", &task, &agent_context));
+            
+            pb.finish_and_clear();
+
+            // 4. Procesar resultado
+             match result {
+                Ok(res) => {
+                    println!("{}", "🔄 MIGRACIÓN GENERADA".bold().green());
+                    
+                    // Sugerir nombre de archivo destino
+                    let nueva_ext = match dst.to_lowercase().as_str() {
+                        "nestjs" | "angular" | "ts" => "ts",
+                        "react" | "nextjs" => "tsx",
+                        "rust" => "rs",
+                        "python" => "py",
+                        _ => "ts", // Default
+                    };
+                    
+                    let path_origen = std::path::Path::new(&src);
+                    let nombre_base = path_origen.file_stem().unwrap().to_str().unwrap();
+                    let nuevo_nombre = format!("{}.migrated.{}", nombre_base, nueva_ext);
+                    
+                    if let Some(code) = res.artifacts.first() {
+                         println!("\n{}", code);
+                         
+                         println!("\n{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".dimmed());
+                         use std::io::{self, Write};
+                         print!("💾 ¿Guardar como '{}'? (s/n): ", nuevo_nombre.cyan());
+                         io::stdout().flush().unwrap();
+                         
+                         let mut input = String::new();
+                         io::stdin().read_line(&mut input).unwrap();
+                         
+                         if input.trim().to_lowercase() == "s" {
+                             if let Err(e) = std::fs::write(&nuevo_nombre, code) {
+                                  println!("❌ Error al guardar: {}", e);
+                             } else {
+                                  println!("✅ Archivo guardado: {}", nuevo_nombre.green());
+                             }
+                         }
+                    } else {
+                        println!("⚠️  El agente no generó código válido.");
+                        println!("{}", res.output);
+                    }
+                }
+                Err(e) => {
+                    println!("{} {}", "❌ Error en migración:".bold().red(), e);
+                }
+            }
+        }
+        ProCommands::Review => {
+            let pb = ui::crear_progreso("Analizando estructura del proyecto...");
+            
+            // 1. Generar mapa del proyecto (Tree)
+            let mut project_tree = String::new();
+            let mut file_count = 0;
+            
+            let walker = ignore::WalkBuilder::new(&agent_context.project_root)
+                .hidden(false)
+                .git_ignore(true)
+                .build();
+                
+            for result in walker {
+                if let Ok(entry) = result {
+                    let path = entry.path();
+                    if let Ok(rel) = path.strip_prefix(&agent_context.project_root) {
+                        let depth = rel.components().count();
+                        if depth > 4 { continue; } // Limitar profundidad para no saturar
+                        
+                        let indent = "  ".repeat(depth);
+                        let name = path.file_name().unwrap_or_default().to_string_lossy();
+                        
+                        project_tree.push_str(&format!("{}{}\n", indent, name));
+                        file_count += 1;
+                    }
+                }
+            }
+            
+            // 2. Leer dependencias
+            let deps = crate::files::leer_dependencias(&agent_context.project_root);
+            let deps_list = deps.join(", ");
+            
+            pb.finish_with_message("Estructura analizada.");
+            
+            let pb_agent = ui::crear_progreso("Ejecutando Auditoría de Arquitectura (ReviewerAgent)...");
+
+            let task = Task {
+                id: uuid::Uuid::new_v4().to_string(),
+                description: "Realiza una auditoría técnica de alto nivel del proyecto. \n\
+                              TU OBJETIVO: Evaluar la arquitectura, organización y stack tecnológico.\n\
+                              1. Analiza la estructura de directorios: ¿Sigue buenas prácticas (DDD, Clean Arch, MVC)?\n\
+                              2. Analiza las dependencias: ¿Hay librerías obsoletas o redundantes? ¿El stack es coherente?\n\
+                              3. Identifica posibles cuellos de botella o deuda técnica basada en la organización.\n\
+                              4. Sugiere mejoras arquitectónicas.".to_string(),
+                task_type: TaskType::Analyze,
+                file_path: None,
+                context: Some(format!(
+                    "ESTADÍSTICAS:\nArchivos escaneados: {}\n\nESTRUCTURA DE DIRECTORIOS:\n{}\n\nSTACK TECNOLÓGICO (Dependencias):\n{}", 
+                    file_count, project_tree, deps_list
+                )),
+            };
+
+            let result =
+                rt.block_on(orchestrator.execute_task("ReviewerAgent", &task, &agent_context));
+            
+            pb_agent.finish_and_clear();
+
+            match result {
+                Ok(res) => {
+                    println!("{}", "🏗️  AUDITORÍA DE ARQUITECTURA COMPLETADA".bold().green());
+                    println!("{}", res.output);
+                }
+                Err(e) => {
+                    println!("{} {}", "❌ Error en Review:", e);
+                }
+            }
+        }
+        ProCommands::Explain { file } => {
+            let pb = ui::crear_progreso(&format!("Analizando {} para explicación...", file));
+            
+            let content = match std::fs::read_to_string(&file) {
+                 Ok(c) => c,
+                 Err(e) => {
+                     pb.finish_and_clear();
+                     println!("{} {}", "❌ Error al leer archivo:".bold().red(), e);
+                     return;
+                 }
+            };
+            
+            let task = Task {
+                id: uuid::Uuid::new_v4().to_string(),
+                description: format!("Explica detalladamente qué hace este código, cómo funciona y sus puntos clave. Sé didáctico."),
+                task_type: TaskType::Analyze, // Analyze fits well for explanation
+                file_path: Some(std::path::PathBuf::from(&file)),
+                context: Some(content),
+            };
+
+            // Usamos CoderAgent porque suele ser mejor explicando lógica de código
+            let result =
+                rt.block_on(orchestrator.execute_task("CoderAgent", &task, &agent_context));
+            
+            pb.finish_and_clear();
+
+             match result {
+                Ok(res) => {
+                    println!("{}", "📘 EXPLICACIÓN DE CÓDIGO".bold().cyan());
+                    println!("{}", res.output);
+                }
+                Err(e) => {
+                    println!("{} {}", "❌ Error al explicar:", e);
+                }
+            }
+        }
+        ProCommands::Optimize { file } => {
+            let pb = ui::crear_progreso(&format!("Buscando optimizaciones en {}...", file));
+            
+            let content = match std::fs::read_to_string(&file) {
+                 Ok(c) => c,
+                 Err(e) => {
+                     pb.finish_and_clear();
+                     println!("{} {}", "❌ Error al leer archivo:".bold().red(), e);
+                     return;
+                 }
+            };
+            
+            let task = Task {
+                id: uuid::Uuid::new_v4().to_string(),
+                description: format!("Analiza el código en busca de cuellos de botella de rendimiento, uso ineficiente de memoria o complejidad algorítmica innecesaria. Sugiere optimizaciones concretas."),
+                task_type: TaskType::Analyze,
+                file_path: Some(std::path::PathBuf::from(&file)),
+                context: Some(content),
+            };
+
+            // ReviewerAgent es bueno encontrando problemas
+            let result =
+                rt.block_on(orchestrator.execute_task("ReviewerAgent", &task, &agent_context));
+            
+            pb.finish_and_clear();
+
+             match result {
+                Ok(res) => {
+                    println!("{}", "⚡ REPORTE DE OPTIMIZACIÓN".bold().yellow());
+                    println!("{}", res.output);
+                }
+                Err(e) => {
+                    println!("{} {}", "❌ Error al optimizar:", e);
+                }
+            }
         }
     }
 }

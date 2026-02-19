@@ -30,6 +30,8 @@ Real-time monitoring tool written in **Rust** that analyzes code changes using *
 - 💾 **Smart Caching** - Reduces API costs up to 70%
 - 📊 **Real-time Metrics** - Tracking bugs, costs, tokens, and productivity
 - 🧪 **Autonomous Testing** - AI-assisted test generation and execution
+- 🔄 **Advanced Workflows** - Multi-step automation (Fix & Verify, Review & Mitigate)
+- 🚀 **Framework Migration** - Intelligent code translation between frameworks
 - 🎯 **Parent File Detection** - Automatically finds parent modules
 - 📚 **Auto-documentation** - Generates technical manuals automatically
 - 🔒 **Security Pro** - Local LLM support for 100% offline privacy
@@ -81,11 +83,19 @@ Once started, Sentinel responds to these commands:
 Access advanced features using the `pro` sub-command:
 
 ```bash
+# Core Commands
 sentinel pro analyze <file>   # Deep architectural analysis (Reviewer Agent)
 sentinel pro generate <file>  # Generate code from local context (Coder Agent)
 sentinel pro refactor <file>  # Proactive refactoring suggestions (Coder Agent)
 sentinel pro fix <file>       # Intelligent bug fixing
 sentinel pro chat             # Interactive codebase chat
+
+# Advanced Workflow Commands (New!)
+sentinel pro workflow <name>  # Execute multi-step workflows (e.g., fix-and-verify)
+sentinel pro migrate <s, d>   # Migrate code between frameworks (Pro)
+sentinel pro review           # Full project terminology & architectural audit
+sentinel pro explain <file>   # Didactic code explanation
+sentinel pro optimize <file>  # Performance optimization suggestions
 ```
 
 💡 **Tip:** On startup, Sentinel automatically displays the command list.

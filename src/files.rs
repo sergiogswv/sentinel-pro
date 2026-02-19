@@ -166,6 +166,58 @@ pub fn buscar_archivo_test(
     None
 }
 
+/// Lee las dependencias del proyecto desde package.json o Cargo.toml
+///
+/// # Argumentos
+/// * `project_path` - Path raíz del proyecto
+///
+/// # Retorna
+/// * `Vec<String>` - Lista de dependencias encontradas (ej: ["react", "typescript"])
+pub fn leer_dependencias(project_path: &Path) -> Vec<String> {
+    let mut deps = Vec::new();
+
+    // Intentar leer package.json
+    let package_json_path = project_path.join("package.json");
+    if package_json_path.exists() {
+        if let Ok(content) = fs::read_to_string(package_json_path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(dependencies) = json.get("dependencies").and_then(|v| v.as_object()) {
+                    deps.extend(dependencies.keys().cloned());
+                }
+                if let Some(dev_dependencies) = json.get("devDependencies").and_then(|v| v.as_object()) {
+                    deps.extend(dev_dependencies.keys().cloned());
+                }
+            }
+        }
+    }
+
+    // Intentar leer Cargo.toml
+    let cargo_toml_path = project_path.join("Cargo.toml");
+    if cargo_toml_path.exists() {
+        if let Ok(content) = fs::read_to_string(cargo_toml_path) {
+            // Parser simple para TOML (buscando [dependencies])
+            let mut in_deps = false;
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("[dependencies]") {
+                    in_deps = true;
+                    continue;
+                } else if trimmed.starts_with("[") {
+                    in_deps = false;
+                }
+
+                if in_deps && !trimmed.is_empty() && !trimmed.starts_with("#") {
+                    if let Some(name) = trimmed.split('=').next() {
+                         deps.push(name.trim().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    deps
+}
+
 #[cfg(test)]
 mod test_buscar {
     use super::*;

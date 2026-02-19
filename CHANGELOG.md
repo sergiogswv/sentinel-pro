@@ -4,6 +4,28 @@ All notable changes to Sentinel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [5.0.0-pro.alpha.4] - 2026-02-19
+
+### 🔮 Advanced Workflows & Integration (Fase 6)
+
+#### Workflow Engine
+- **Motor de Flujos Multi-Step**: Nuevo sistema para encadenar agentes (`WorkflowEngine`).
+- **Workflows Predefinidos**:
+  - `fix-and-verify`: CoderAgent (Fix) -> RefactorAgent (Clean) -> TesterAgent (Test).
+  - `review-security`: ReviewerAgent (Audit) -> CoderAgent (Mitigate).
+- **Pro Command**: `sentinel pro workflow <name> [file]`.
+
+#### Framework Migration
+- **Smart Migration**: Nuevo comando `sentinel pro migrate <src> <dst>` para convertir código entre frameworks (ej: Express -> NestJS).
+- **Dependency Aware**: `CoderAgent` ahora detecta dependencias del proyecto (`package.json`) para evitar alucinaciones.
+
+#### High-Level Operations
+- **Full Project Review**: `sentinel pro review` realiza una auditoría arquitectónica completa del proyecto.
+- **Explain & Optimize**: Nuevos comandos didácticos y de rendimiento (`explain`, `optimize`).
+- **UI Integrada**: Menú de ayuda actualizado con sección "Advanced Commands".
+
+---
+
 ## [5.0.0-pro.alpha.3] - 2026-02-18
 
 ### 👥 Sistema Multi-Agent (Etapa 3)

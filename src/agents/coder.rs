@@ -37,13 +37,28 @@ impl CoderAgent {
             prompt.push_str(&format!("\nINFORMACIÓN ADICIONAL:\n{}\n", ctx));
         }
 
+        // Obtener dependencias
+        let deps = crate::files::leer_dependencias(&context.project_root);
+        let deps_list = if deps.is_empty() {
+            "No se detectaron dependencias explícitas.".to_string()
+        } else {
+            // Limitar a las primeras 50 para no saturar el prompt
+            deps.iter().take(50).cloned().collect::<Vec<_>>().join(", ")
+        };
+
+        prompt.push_str(&format!(
+            "\nDEPENDENCIAS DISPONIBLES:\n{}\n",
+            deps_list
+        ));
+
         prompt.push_str(
             "\nREQUISITOS:\n\
             1. Genera código limpio, moderno y siguiendo las mejores prácticas.\n\
             2. Usa tipado fuerte si el lenguaje lo permite.\n\
             3. Si es una modificación, mantén el estilo del código existente.\n\
-            4. Devuelve SOLO el código necesario dentro de un bloque markdown (```).\n\
-            5. Si necesitas explicar algo, hazlo brevemente DESPUÉS del bloque de código.\n"
+            4. Si necesitas usar una librería externa NO listada arriba, indica explícitamente el comando de instalación.\n\
+            5. Devuelve SOLO el código necesario dentro de un bloque markdown (```).\n\
+            6. Si necesitas explicar algo, hazlo brevemente DESPUÉS del bloque de código.\n"
         );
 
         prompt

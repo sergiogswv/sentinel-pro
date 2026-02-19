@@ -151,12 +151,25 @@ pub fn mostrar_ayuda(config: Option<&SentinelConfig>) {
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".bright_cyan()
     );
     println!("{}", "🚀 COMANDOS PRO (Ejecutar en terminal)".bright_magenta().bold());
-    println!("  sentinel pro analyze <file>   {}", "Análisis arquitectónico (Reviewer)".dimmed());
-    println!("  sentinel pro generate <file>  {}", "Generación de código (Coder)".dimmed());
-    println!("  sentinel pro refactor <file>  {}", "Refactorización (Refactor)".dimmed());
-    println!("  sentinel pro fix <file>       {}", "Corrección de bugs".dimmed());
-    println!("  sentinel pro test-all         {}", "Generación de tests (Tester)".dimmed());
-    println!("  sentinel pro chat             {}", "Chat con el codebase".dimmed());
+    println!("  sentinel-pro pro analyze <file>   {}", "Análisis arquitectónico (Reviewer)".dimmed());
+    println!("  sentinel-pro pro generate <file>  {}", "Generación de código (Coder)".dimmed());
+    println!("  sentinel-pro pro refactor <file>  {}", "Refactorización (Refactor)".dimmed());
+    println!("  sentinel-pro pro fix <file>       {}", "Corrección de bugs".dimmed());
+    println!("  sentinel-pro pro test-all         {}", "Generación de tests (Tester)".dimmed());
+    println!("  sentinel-pro pro chat             {}", "Chat con el codebase".dimmed());
+    println!("  sentinel-pro pro docs <dir>       {}", "Generar documentación".dimmed());
+    println!(
+        "{}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".bright_cyan()
+    );
+    println!("{}", "🔮 COMANDOS AVANZADOS".bright_magenta().bold());
+    println!("  sentinel-pro pro workflow <name>  {}", "Ejecutar workflows:".dimmed());
+    println!("  {}", "                                  - fix-and-verify (Fix + Refactor + Test)".dimmed());
+    println!("  {}", "                                  - review-security (Audit + Mitigate)".dimmed());
+    println!("  sentinel-pro pro migrate <s, d>   {}", "Migrar código entre frameworks".dimmed());
+    println!("  sentinel-pro pro review           {}", "Auditoría completa de proyecto".dimmed());
+    println!("  sentinel-pro pro explain <file>   {}", "Explicación didáctica de código".dimmed());
+    println!("  sentinel-pro pro optimize <file>  {}", "Sugerencias de optimización".dimmed());
     println!(
         "{}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n".bright_cyan()

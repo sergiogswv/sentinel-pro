@@ -72,6 +72,13 @@ pub enum ProCommands {
         /// Archivo a optimizar
         file: String,
     },
+    /// Ejecutar un workflow definido
+    Workflow {
+        /// Nombre del workflow (ej: fix-and-verify)
+        name: String,
+        /// Archivo objetivo (opcional)
+        file: Option<String>,
+    },
     /// Gestión de modelos de ML Local
     Ml {
         #[command(subcommand)]
