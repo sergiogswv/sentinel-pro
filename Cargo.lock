@@ -2671,7 +2671,7 @@ checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
 
 [[package]]
 name = "sentinel-rust"
-version = "5.0.0-pro.alpha.4"
+version = "5.0.0-pro.beta.1"
 dependencies = [
  "anyhow",
  "async-trait",

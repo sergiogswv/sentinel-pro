@@ -4,6 +4,25 @@ All notable changes to Sentinel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [5.0.0-pro.beta.1] - 2026-02-19
+
+### 🚀 Calidad, Testing y Lanzamiento (Fase 7)
+
+#### Hardening y Seguridad
+- **Path Traversal Prevention**: Nuevas utilidades `is_safe_path` y `secure_join` para evitar que la IA escriba fuera del proyecto durante los workflows iterativos.
+- **Sandboxing de Tests**: La ejecución automatizada de Jest mediante `TesterAgent` ahora limpia las variables de entorno (`.env_clear()`), permitiendo solo `PATH`, `NODE_ENV`, `USER` y `HOME`. Evita fuga de *secrets* en el entorno de pruebas.
+- **Limpieza de Warnings**: Eliminadas de código muerto e imports sin uso.
+
+#### Release & CI/CD
+- **Pipeline Multi-plataforma**: Nuevo flujo de trabajo oficial de GitHub Actions para compilación en Ubuntu, Windows y macOS (arquitecturas AMD64 y ARM64).
+- **Auto Releases**: Integración con releases de GitHub en formato de binario nativo por cada tag `v*`.
+
+#### Documentación (website)
+- **Sitio de Docusaurus**: Setup oficial del portal de documentación `website`.
+- Nueva guía interactiva detallada para la configuración de Workflows personalizados.
+
+---
+
 ## [5.0.0-pro.alpha.4] - 2026-02-19
 
 ### 🔮 Advanced Workflows & Integration (Fase 6)

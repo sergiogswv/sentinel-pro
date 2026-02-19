@@ -78,7 +78,12 @@ impl WorkflowEngine {
             
             // Leer archivo actual si existe para contexto
             let file_content = if let Some(file) = &wf_context.current_file {
-                 std::fs::read_to_string(file).ok()
+                 let safe_path = crate::files::secure_join(&agent_context.project_root, std::path::Path::new(file));
+                 if let Ok(safe_path) = safe_path {
+                     std::fs::read_to_string(&safe_path).ok()
+                 } else {
+                     None
+                 }
             } else {
                 None
             };
@@ -115,11 +120,18 @@ impl WorkflowEngine {
                     // Estrategia simple: Si es 'Refactor' o 'Fix' y hay artifacts, aplicarlos al archivo real
                     // para que el siguiente paso (ej: Verification) lea el archivo actualizado.
                     if !result.artifacts.is_empty() && wf_context.current_file.is_some() {
-                        let path = wf_context.current_file.as_ref().unwrap();
-                         if let Err(e) = std::fs::write(path, &result.artifacts[0]) {
-                            println!("      ⚠️ Error al escribir archivo intermedio: {}", e);
-                        } else {
-                            println!("      💾 Archivo actualizado por el agente.");
+                        let path_str = wf_context.current_file.as_ref().unwrap();
+                        match crate::files::secure_join(&agent_context.project_root, std::path::Path::new(path_str)) {
+                            Ok(safe_path) => {
+                                if let Err(e) = std::fs::write(&safe_path, &result.artifacts[0]) {
+                                    println!("      ⚠️ Error al escribir archivo intermedio: {}", e);
+                                } else {
+                                    println!("      💾 Archivo actualizado por el agente.");
+                                }
+                            },
+                            Err(e) => {
+                                println!("      ⚠️ Intento de acceso denegado: {}", e);
+                            }
                         }
                     }
 

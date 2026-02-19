@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.0.0--pro.alpha.4-purple.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-5.0.0--pro.beta.1-purple.svg" alt="Version">
   <img src="https://img.shields.io/badge/rust-2024-orange.svg" alt="Rust">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
 </p>
@@ -96,6 +96,7 @@ sentinel pro migrate <s, d>   # Migrate code between frameworks (Pro)
 sentinel pro review           # Full project terminology & architectural audit
 sentinel pro explain <file>   # Didactic code explanation
 sentinel pro optimize <file>  # Performance optimization suggestions
+sentinel pro docs <dir>       # Generates comprehensive Markdown documentation for a directory
 ```
 
 💡 **Tip:** On startup, Sentinel automatically displays the command list.
@@ -110,6 +111,7 @@ sentinel pro optimize <file>  # Performance optimization suggestions
 - **[Advanced Configuration](docs/configuration.md)** - `.sentinelrc.toml` in detail
 - **[Commands and Usage](docs/commands.md)** - Complete guide to all commands
 - **[AI Providers](docs/ai-providers.md)** - Claude, Gemini, and more
+- **[Advanced Workflows](docs/workflows.md)** - Guide for executing and creating workflows
 - **[Usage Examples](docs/examples.md)** - Real-world use cases
 
 ### 🔧 Technical References
@@ -205,7 +207,7 @@ Phase 3: ✅ Completed - Optimization and stability
 Phase 4: ✅ Completed - Multi-model AI & Parent file detection (v4.5.0)
 Phase 5: ✅ Completed - CLI Dispatcher, Local LLMs & Rules Engine (v5.0.0-pro)
 Phase 6: ✅ Completed - Local Knowledge Base & Vector Search (v5.0.0-pro.alpha.4)
-Phase 7: 🚧 In Progress - AI Multi-Agent System (Architect, QA, Dev)
+Phase 7: ✅ Completed - AI Multi-Agent System (Architect, QA, Dev) (v5.0.0-pro.beta.1)
 Phase 8: 📅 Planned - SecOps & Automated Code Reviews
 ```
 

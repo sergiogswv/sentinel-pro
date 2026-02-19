@@ -8,7 +8,34 @@
 //! el framework del proyecto (NestJS, Django, Laravel, etc.)
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Valida que la ruta proporcionada no intente escapar del directorio base con `..`
+pub fn is_safe_path(target: &Path) -> bool {
+    for component in target.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Combina de forma segura un path destino con la raíz del proyecto.
+/// Retorna un error si hay un intento de Path Traversal.
+pub fn secure_join(project_root: &Path, target: &Path) -> Result<PathBuf, String> {
+    if !is_safe_path(target) {
+        return Err(format!("Intento de Path Traversal detectado: {:?}", target));
+    }
+    
+    if target.is_absolute() {
+        if !target.starts_with(project_root) {
+            return Err(format!("Ruta absoluta fuera del proyecto: {:?}", target));
+        }
+        return Ok(target.to_path_buf());
+    }
+
+    Ok(project_root.join(target))
+}
 
 /// Verifica si un archivo es de tipo "padre" según los patrones del framework
 ///

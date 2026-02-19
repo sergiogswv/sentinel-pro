@@ -1,6 +1,6 @@
 [package]
 name = "sentinel-rust"
-version = "5.0.0-pro.alpha.4"
+version = "5.0.0-pro.beta.1"
 edition = "2024"
 
 [[bin]]

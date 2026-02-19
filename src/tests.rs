@@ -18,10 +18,15 @@ pub fn ejecutar_tests(test_path: &str, project_path: &Path) -> Result<(), String
     println!("🧪 Ejecutando tests: {}", test_path.cyan());
     println!(); // Línea en blanco para separar
 
-    // Usar .status() para que la salida se muestre en tiempo real
+    // 🛡️ Sandboxing: Limpiar variables de entorno para evitar acceso a secretos (AWS_KEYS, API_TOKENS)
     let status = Command::new("npx")
         .args(["jest", test_path, "--passWithNoTests", "--colors"])
         .current_dir(project_path)
+        .env_clear() 
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("NODE_ENV", "test")
+        .env("USER", std::env::var("USER").unwrap_or_default())
+        .env("HOME", std::env::var("HOME").unwrap_or_default())
         .status()
         .map_err(|e| format!("Error al ejecutar Jest: {}", e))?;
 
@@ -41,6 +46,11 @@ pub fn capturar_error_test(test_path: &str, project_path: &Path) -> String {
     let output = Command::new("npx")
         .args(["jest", test_path, "--passWithNoTests", "--no-colors"])
         .current_dir(project_path)
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("NODE_ENV", "test")
+        .env("USER", std::env::var("USER").unwrap_or_default())
+        .env("HOME", std::env::var("HOME").unwrap_or_default())
         .output();
 
     match output {
