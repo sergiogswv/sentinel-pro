@@ -90,58 +90,11 @@ if [ ! -f "$CONFIG_FILE" ]; then
 framework = "Rust"
 code_language = "rust"
 
-[knowledge_base]
-vector_db_url = "http://127.0.0.1:6334"
-index_on_start = true
-
 [ai]
 api_key = "tu-api-key-aqui"
 model = "claude-3-5-sonnet"
 EOF
     success "Archivo de configuración creado en $CONFIG_FILE"
-fi
-
-# --- SECCIÓN QDRANT (Linux/macOS) ---
-echo ""
-read -p "❓ ¿Deseas instalar Qdrant (Vector Database) automáticamente? (s/n): " choice
-if [[ "$choice" == "s" || "$choice" == "S" ]]; then
-    info "Iniciando instalación de Qdrant..."
-    QDRANT_DIR="$INSTALL_DIR/qdrant"
-    mkdir -p "$QDRANT_DIR"
-    
-    # Detectar arquitectura y OS
-    OS_TYPE=$(uname -s | tr '[:upper:]' '[:lower:]')
-    ARCH_TYPE=$(uname -m)
-    
-    if [[ "$OS_TYPE" == "darwin" ]]; then
-        DOWNLOAD_NAME="qdrant-x86_64-apple-darwin.tar.gz" # Default para Mac
-        if [[ "$ARCH_TYPE" == "arm64" ]]; then DOWNLOAD_NAME="qdrant-aarch64-apple-darwin.tar.gz"; fi
-    else
-        DOWNLOAD_NAME="qdrant-x86_64-unknown-linux-gnu.tar.gz"
-        if [[ "$ARCH_TYPE" == "aarch64" ]]; then DOWNLOAD_NAME="qdrant-aarch64-unknown-linux-gnu.tar.gz"; fi
-    fi
-
-    info "Obteniendo última versión desde GitHub..."
-    LATEST_TAG=$(curl -s https://api.github.com/repos/qdrant/qdrant/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    
-    info "Descargando Qdrant $LATEST_TAG..."
-    curl -L "https://github.com/qdrant/qdrant/releases/download/$LATEST_TAG/$DOWNLOAD_NAME" -o "$QDRANT_DIR/qdrant.tar.gz"
-    
-    info "Extrayendo..."
-    tar -xzf "$QDRANT_DIR/qdrant.tar.gz" -C "$QDRANT_DIR"
-    rm "$QDRANT_DIR/qdrant.tar.gz"
-    chmod +x "$QDRANT_DIR/qdrant"
-    
-    # Crear script de inicio
-    cat > "$QDRANT_DIR/run-qdrant.sh" << 'EOF'
-#!/bin/bash
-cd "$(dirname "$0")"
-./qdrant
-EOF
-    chmod +x "$QDRANT_DIR/run-qdrant.sh"
-    
-    success "Qdrant instalado en $QDRANT_DIR"
-    info "Puedes iniciarlo manualmente con: $QDRANT_DIR/run-qdrant.sh"
 fi
 
 echo -e "${GREEN}"

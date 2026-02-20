@@ -2,7 +2,6 @@ use crate::agents::base::{Agent, AgentContext, Task, TaskResult};
 use crate::ai::client::{consultar_ia_dinamico, TaskType};
 use crate::ai::utils::extraer_codigo;
 use async_trait::async_trait;
-use colored::*;
 use std::sync::Arc;
 
 pub struct TesterAgent;
@@ -67,21 +66,11 @@ impl Agent for TesterAgent {
     async fn execute(&self, task: &Task, context: &AgentContext) -> anyhow::Result<TaskResult> {
         println!("   🧪 TesterAgent: Procesando tarea '{}'...", task.description);
 
-        // Intentar obtener contexto relevante de la Knowledge Base
-        let mut rag_context = String::new();
-        if let Some(kb) = &context.context_builder {
-            print!("{}", "   🧠 Consultando Knowledge Base...".dimmed());
-            match kb.build_context(&task.description, 3, false).await {
-                Ok(ctx) => {
-                    rag_context = ctx;
-                    println!("{}", " OK".green());
-                },
-                Err(e) => {
-                    println!("{}", " Error".red());
-                    eprintln!("      Error consultando KB: {}", e);
-                }
-            }
-        }
+        let rag_context = if let Some(path) = &task.file_path {
+            context.build_rag_context(path)
+        } else {
+            String::new()
+        };
 
         let prompt_context = if rag_context.is_empty() { None } else { Some(rag_context.as_str()) };
         let prompt = self.build_prompt(task, context, prompt_context);

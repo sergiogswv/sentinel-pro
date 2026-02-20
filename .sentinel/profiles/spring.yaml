@@ -1,0 +1,35 @@
+framework: Spring
+language: java
+rules:
+  - name: "No System.out.println"
+    description: "Usar un logger como slf4j en lugar de System.out.println()"
+    patterns:
+      - "System.out.println"
+    forbidden_patterns: []
+    required_imports: []
+    level: Warning
+  - name: "Avoid Field Injection"
+    description: "Se prefiere inyección por constructor sobre @Autowired en campos."
+    patterns:
+      - "@Autowired\n    private"
+    forbidden_patterns: []
+    required_imports: []
+    level: Info
+
+architecture_patterns:
+  - name: Controller
+    selector: "**/*Controller.java"
+    expected_parent: null
+    expected_layer: "Presentation"
+  - name: Service
+    selector: "**/*Service.java"
+    expected_parent: null
+    expected_layer: "Business"
+  - name: Repository
+    selector: "**/*Repository.java"
+    expected_parent: null
+    expected_layer: "Data"
+  - name: Entity
+    selector: "**/entity/**/*.java"
+    expected_parent: null
+    expected_layer: "Domain"

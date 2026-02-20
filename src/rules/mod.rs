@@ -1,4 +1,7 @@
 pub mod engine;
+pub mod static_analysis;
+
+pub use engine::RuleEngine;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -33,4 +36,10 @@ pub struct ArchitecturePattern {
     pub selector: String, // e.g., "**/*.service.ts"
     pub expected_parent: Option<String>,
     pub expected_layer: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleViolation {
+    pub rule_name: String,
+    pub message: String,
+    pub level: RuleLevel,
 }

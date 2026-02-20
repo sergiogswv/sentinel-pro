@@ -1,0 +1,30 @@
+framework: NestJS
+language: typescript
+rules:
+  - name: No direct console.log
+    description: "Evita el uso de console.log directamente. Usa el Logger de NestJS."
+    patterns:
+      - "console.log("
+    forbidden_patterns: []
+    required_imports: []
+    level: Warning
+  - name: Injectable decorator
+    description: "Los servicios deben usar el decorador @Injectable()"
+    patterns: []
+    forbidden_patterns: []
+    required_imports: []
+    level: Error
+
+architecture_patterns:
+  - name: Controller
+    selector: "**/*.controller.ts"
+    expected_parent: null
+    expected_layer: "Presentation"
+  - name: Service
+    selector: "**/*.service.ts"
+    expected_parent: null
+    expected_layer: "Business"
+  - name: Module
+    selector: "**/*.module.ts"
+    expected_parent: null
+    expected_layer: "Configuration"

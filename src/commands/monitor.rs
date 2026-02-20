@@ -1,7 +1,7 @@
 use crate::config::SentinelConfig;
 use crate::rules::engine::RuleEngine;
 use crate::stats::SentinelStats;
-use crate::{ai, config, docs, files, git, kb, tests, ui};
+use crate::{ai, config, docs, files, git, index, tests, ui, business_logic_guard};
 use colored::*;
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use std::collections::HashMap;
@@ -26,6 +26,11 @@ pub fn start_monitor() {
     let config = Arc::new(ui::inicializar_sentinel(&project_path));
     let stats = Arc::new(Mutex::new(SentinelStats::cargar(&project_path)));
 
+    // --- Knowledge Base (v5.0.0 Pro) con SQLite ---
+    let db_path = project_path.join(".sentinel/index.db");
+    let index_db = Arc::new(index::IndexDb::open(db_path).expect("No se pudo abrir la base de datos de índice"));
+    let index_builder = Arc::new(index::ProjectIndexBuilder::new(Arc::clone(&index_db)));
+
     // Motor de Reglas Pro
     let mut rule_engine = RuleEngine::new();
     let rules_path = project_path.join(".sentinel/rules.yaml");
@@ -36,13 +41,13 @@ pub fn start_monitor() {
             println!("   ✅ Reglas de arquitectura Pro cargadas.");
         }
     }
-    let rule_engine = Arc::new(rule_engine);
+    let rule_engine = Arc::new(rule_engine.with_index_db(Arc::clone(&index_db)));
 
-    // --- Knowledge Base (v5.0.0 Pro) ---
-    let kb_tx = Arc::new(Mutex::new(iniciar_kb_recurso(
-        Arc::clone(&config),
-        project_path.clone(),
-    )));
+    // Indexación inicial (Capa 1)
+    let spinner_index = ui::crear_progreso("   🧠 Indexando proyecto (Capa 1)...");
+    let _ = index_builder.index_project(&project_path, &config.file_extensions);
+    spinner_index.finish_and_clear();
+    println!("   ✅ Proyecto indexado en SQLite.");
 
     let esta_pausado = Arc::new(Mutex::new(false));
     let pausa_loop = Arc::clone(&esta_pausado);
@@ -57,7 +62,7 @@ pub fn start_monitor() {
     let stats_hilo = Arc::clone(&stats);
     let pausa_hilo = Arc::clone(&esta_pausado);
     let esperando_input_hilo = Arc::clone(&esperando_input);
-    let kb_tx_hilo = Arc::clone(&kb_tx);
+    let index_builder_hilo = Arc::clone(&index_builder);
 
     thread::spawn(move || {
         loop {
@@ -132,17 +137,9 @@ pub fn start_monitor() {
                         println!("✅ Auditoría terminada. Volviendo a monitorear...\n");
                     }
                 } else if cmd == "k" {
-                    // Re-intentar conexión
-                    crate::commands::pro::handle_pro_command(crate::commands::ProCommands::Kb {
-                        subcommand: crate::commands::KbCommands::Retry,
-                    });
-
-                    // Si funcionó (el archivo se actualizó), recargar config y reiniciar KB
-                    if let Some(new_config) = SentinelConfig::load(&project_path_hilo) {
-                        let mut kb_tx_lock = kb_tx_hilo.lock().unwrap();
-                        *kb_tx_lock =
-                            iniciar_kb_recurso(Arc::new(new_config), project_path_hilo.clone());
-                    }
+                    println!("   🧠 Re-indexando proyecto...");
+                    let _ = index_builder_hilo.index_project(&project_path_hilo, &config_hilo.file_extensions);
+                    println!("   ✅ Re-indexación completada.");
                 } else if cmd == "h" || cmd == "help" {
                     ui::mostrar_ayuda(Some(&config_hilo));
                 } else if cmd == "x" {
@@ -174,8 +171,9 @@ pub fn start_monitor() {
         }
     })
     .unwrap();
+    let project_path_watcher = project_path.clone();
     watcher
-        .watch(&project_path.join("src"), RecursiveMode::Recursive)
+        .watch(&project_path_watcher.join("src"), RecursiveMode::Recursive)
         .unwrap();
 
     let leer_respuesta = move || -> Option<String> {
@@ -224,11 +222,38 @@ pub fn start_monitor() {
             .unwrap()
             .to_string();
 
-        // --- Actualizar Knowledge Base (Incremental) ---
-        if let Some(tx_kb) = kb_tx.lock().unwrap().as_ref() {
-            let _ = tx_kb.try_send(kb::KBUpdate {
-                file_path: changed_path.to_string_lossy().to_string(),
-            });
+        // --- Actualizar Índice de Símbolos (SQLite) ---
+        let _ = index_builder.index_file(&changed_path, &project_path);
+
+        // --- BusinessLogicGuard: detectar regresiones vs último commit ---
+        let regression_context = {
+            let prev = business_logic_guard::get_git_previous_content(&changed_path, &project_path);
+            if let Some(prev_content) = prev {
+                if let Ok(new_content) = std::fs::read_to_string(&changed_path) {
+                    business_logic_guard::build_regression_context(&prev_content, &new_content)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(ref diff_ctx) = regression_context {
+            println!("\n🔍 {} Analizando regresiones vs último commit...", "BusinessLogicGuard:".bold().yellow());
+            let regression_prompt = business_logic_guard::build_regression_prompt(diff_ctx, &file_name);
+            let config_bg = Arc::clone(&config);
+            let stats_bg = Arc::clone(&stats);
+            let project_bg = project_path.clone();
+            if let Ok(result) = ai::client::consultar_ia_dinamico(regression_prompt, ai::client::TaskType::Light, &config_bg, stats_bg, &project_bg) {
+                if result.contains("REGRESION_DETECTADA") {
+                    println!("   {} {}", "⚠️  REGRESIÓN:".red().bold(), result.lines().find(|l| l.contains("REGRESION_DETECTADA")).unwrap_or(""));
+                } else if result.contains("REVISAR") {
+                    println!("   {} {}", "🔎 REVISAR:".yellow(), result.lines().find(|l| l.contains("REVISAR")).unwrap_or(""));
+                } else {
+                    println!("   {} Sin regresiones de lógica de negocio detectadas.", "✅".green());
+                }
+            }
         }
 
         let base_name = match files::detectar_archivo_padre(
@@ -391,66 +416,3 @@ pub fn start_monitor() {
     }
 }
 
-/// Inicializa la Knowledge Base en segundo plano
-fn iniciar_kb_recurso(
-    config: Arc<SentinelConfig>,
-    project_path: PathBuf,
-) -> Option<tokio::sync::mpsc::Sender<kb::KBUpdate>> {
-    if let Some(features) = &config.features {
-        if features.enable_knowledge_base {
-            if let Some(kb_config) = &config.knowledge_base {
-                if let Ok(db) = kb::VectorDB::new(
-                    &kb_config.vector_db_url,
-                    config.primary_model.embedding_dimension(),
-                ) {
-                    let db = Arc::new(db);
-                    let manager =
-                        Arc::new(kb::KBManager::new(Arc::clone(&db), &config, &project_path));
-
-                    let (tx_kb, rx_kb) = tokio::sync::mpsc::channel(100);
-
-                    let manager_init = Arc::clone(&manager);
-                    let kb_config_init = kb_config.clone();
-
-                    thread::spawn(move || {
-                        let rt = tokio::runtime::Runtime::new().unwrap();
-                        rt.block_on(async {
-                            // Intentar conectar con Qdrant con reintentos para dar tiempo a que inicie
-                            let mut connected = false;
-                            for i in 1..=5 {
-                                if let Ok(_) = db.initialize_collection().await {
-                                    connected = true;
-                                    break;
-                                }
-                                if i < 5 {
-                                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                                }
-                            }
-
-                            if !connected {
-                                println!(
-                                    "   ℹ️  KB: {} (Qdrant no respondió en 127.0.0.1:6334 tras varios intentos)",
-                                    "Modo Offline".yellow()
-                                );
-                                return;
-                            }
-
-                            if kb_config_init.index_on_start {
-                                println!("   🧠 KB: Iniciando indexación del codebase...");
-                                if let Err(e) = manager_init.initial_index().await {
-                                    println!("   ⚠️  KB: Error en indexación inicial: {}", e);
-                                } else {
-                                    println!("   ✅ KB: Indexación inicial completada.");
-                                }
-                            }
-
-                            manager_init.start_background_task(rx_kb).await;
-                        });
-                    });
-                    return Some(tx_kb);
-                }
-            }
-        }
-    }
-    None
-}

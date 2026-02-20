@@ -1,0 +1,35 @@
+framework: Django
+language: python
+rules:
+  - name: "No print in views"
+    description: "No usar print(), utiliza logging"
+    patterns:
+      - "print("
+    forbidden_patterns: []
+    required_imports: []
+    level: Warning
+  - name: "Avoid raw queries"
+    description: "Evita usar raw() con entradas del usuario"
+    patterns:
+      - ".raw("
+    forbidden_patterns: []
+    required_imports: []
+    level: Warning
+
+architecture_patterns:
+  - name: Model
+    selector: "**/models.py"
+    expected_parent: null
+    expected_layer: "Data"
+  - name: View
+    selector: "**/views.py"
+    expected_parent: null
+    expected_layer: "Presentation"
+  - name: Urls
+    selector: "**/urls.py"
+    expected_parent: null
+    expected_layer: "Configuration"
+  - name: Serializer
+    selector: "**/serializers.py"
+    expected_parent: null
+    expected_layer: "Data"

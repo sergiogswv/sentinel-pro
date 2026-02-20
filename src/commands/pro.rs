@@ -1,20 +1,20 @@
 use crate::agents::base::{AgentContext, Task, TaskType};
-use crate::agents::coder::CoderAgent;
+use crate::agents::fix_suggester::FixSuggesterAgent;
 use crate::agents::orchestrator::AgentOrchestrator;
 use crate::agents::refactor::RefactorAgent;
 use crate::agents::reviewer::ReviewerAgent;
 use crate::agents::tester::TesterAgent;
 use crate::commands::ProCommands;
 use crate::config::SentinelConfig;
-use crate::kb::{ContextBuilder, VectorDB};
+use crate::index::IndexDb;
+use crate::rules::RuleLevel;
 use crate::stats::SentinelStats;
 use crate::ui;
 use colored::*;
-use dialoguer::{MultiSelect, theme::ColorfulTheme};
+use dialoguer::{MultiSelect, Select, theme::ColorfulTheme};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 struct AuditIssue {
@@ -24,6 +24,16 @@ struct AuditIssue {
     suggested_fix: String,
     #[serde(default)]
     file_path: String,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+struct ReviewSuggestion {
+    title: String,
+    description: String,
+    impact: String,
+    action_item: String,
+    #[serde(default)]
+    files_involved: Vec<String>,
 }
 
 pub fn handle_pro_command(subcommand: ProCommands) {
@@ -39,7 +49,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
         );
     }
 
-    let mut config = SentinelConfig::load(&project_root).unwrap_or_else(|| {
+    let config = SentinelConfig::load(&project_root).unwrap_or_else(|| {
         if !project_root.join(".sentinelrc.toml").exists() {
             println!(
                 "{} {}",
@@ -52,77 +62,28 @@ pub fn handle_pro_command(subcommand: ProCommands) {
         SentinelConfig::default()
     });
 
-    // Auto-fix inteligente para la URL de KB si es necesario
-    if let Some(ref mut kb) = config.knowledge_base {
-        let mut current_valid = false;
-        let target = kb
-            .vector_db_url
-            .replace("http://", "")
-            .replace("https://", "");
-        if let Some((host, port_str)) = target.split_once(':') {
-            let port = port_str.parse::<u16>().unwrap_or(6334);
-            let actual_host = if host == "localhost" {
-                "127.0.0.1"
-            } else {
-                host
-            };
-            if let Ok(addr) = format!("{}:{}", actual_host, port).parse::<std::net::SocketAddr>() {
-                current_valid =
-                    std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok();
-            }
+    let db_path = project_root.join(".sentinel/index.db");
+    let index_db = match IndexDb::open(&db_path) {
+        Ok(db) => Some(Arc::new(db)),
+        Err(_) => {
+            // Si falla abrirlo, intentamos crear el directorio si no existe
+            let _ = std::fs::create_dir_all(project_root.join(".sentinel"));
+            IndexDb::open(&db_path).ok().map(Arc::new)
         }
-
-        if !current_valid
-            && (kb.vector_db_url.contains("localhost") || kb.vector_db_url.contains("6333"))
-        {
-            let healed_addr: std::net::SocketAddr = "127.0.0.1:6334".parse().unwrap();
-            if std::net::TcpStream::connect_timeout(&healed_addr, Duration::from_millis(200))
-                .is_ok()
-            {
-                println!(
-                    "   🔧 {} Conexión fallida con {}. Usando {}...",
-                    "Smart-Heal:".cyan(),
-                    kb.vector_db_url.yellow(),
-                    "127.0.0.1:6334".green()
-                );
-                kb.vector_db_url = "http://127.0.0.1:6334".to_string();
-                let _ = config.save(&project_root);
-            }
-        }
-    }
+    };
 
     let stats = Arc::new(Mutex::new(SentinelStats::cargar(&project_root)));
-
-    // Inicializar KB Context Builder
-    let context_builder = if let Some(kb_config) = &config.knowledge_base {
-        match VectorDB::new(
-            &kb_config.vector_db_url,
-            config.primary_model.embedding_dimension(),
-        ) {
-            Ok(db) => {
-                // Usamos el modelo primario para embeddings por defecto
-                // Idealmente deberíamos tener una configuración específica para embeddings
-                Some(Arc::new(ContextBuilder::new(
-                    db,
-                    config.primary_model.clone(),
-                )))
-            }
-            Err(_) => None,
-        }
-    } else {
-        None
-    };
 
     let agent_context = AgentContext {
         config: Arc::new(config),
         stats,
         project_root,
-        context_builder,
+        index_db,
     };
 
     // Inicializar Orquestador y Agentes
     let mut orchestrator = AgentOrchestrator::new();
-    orchestrator.register(Arc::new(CoderAgent::new()));
+    orchestrator.register(Arc::new(FixSuggesterAgent::new()));
     orchestrator.register(Arc::new(ReviewerAgent::new()));
     orchestrator.register(Arc::new(TesterAgent::new()));
     orchestrator.register(Arc::new(RefactorAgent::new()));
@@ -131,92 +92,401 @@ pub fn handle_pro_command(subcommand: ProCommands) {
     let rt = tokio::runtime::Runtime::new().unwrap();
 
     match subcommand {
+        ProCommands::Check { target } => {
+            let path = agent_context.project_root.join(&target);
+            if !path.exists() {
+                println!("{} El destino '{}' no existe en el proyecto.", "❌".red(), target);
+                return;
+            }
+
+            let mut files_to_check = Vec::new();
+            if path.is_file() {
+                files_to_check.push(path.clone());
+            } else {
+                let walker = ignore::WalkBuilder::new(&path)
+                    .hidden(false)
+                    .git_ignore(true)
+                    .build();
+                for result in walker {
+                    if let Ok(entry) = result {
+                        let p = entry.path();
+                        if p.is_file() {
+                            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                            if agent_context
+                                .config
+                                .file_extensions
+                                .contains(&ext.to_string())
+                            {
+                                files_to_check.push(p.to_path_buf());
+                            }
+                        }
+                    }
+                }
+            }
+
+            if files_to_check.is_empty() {
+                println!("{} No se encontraron archivos para revisar en '{}'.", "⚠️".yellow(), target);
+                return;
+            }
+
+            println!("\n{} Ejecutando Capa 1 (Análisis Estático) en {} archivos...", "⚡".cyan(), files_to_check.len());
+
+            let mut rule_engine = crate::rules::engine::RuleEngine::new();
+            if let Some(ref db) = agent_context.index_db {
+                rule_engine = rule_engine.with_index_db(Arc::clone(db));
+            }
+            let rules_path = agent_context.project_root.join(".sentinel/rules.yaml");
+            if rules_path.exists() {
+                let _ = rule_engine.load_from_yaml(&rules_path);
+            }
+
+            let mut total_violations = 0;
+            for file_path in &files_to_check {
+                let content = std::fs::read_to_string(file_path).unwrap_or_default();
+                let violations = rule_engine.validate_file(file_path, &content);
+
+                if !violations.is_empty() {
+                    let rel_path = file_path
+                        .strip_prefix(&agent_context.project_root)
+                        .unwrap_or(file_path);
+                    
+                    println!("\n📄 {}", rel_path.display().to_string().bold().cyan());
+                    for v in &violations {
+                        let level_icon = match v.level {
+                            RuleLevel::Error => "❌ ERROR".red(),
+                            RuleLevel::Warning => "⚠️  WARN ".yellow(),
+                            RuleLevel::Info => "ℹ️  INFO ".blue(),
+                        };
+                        println!("   {} [{}]: {}", level_icon, v.rule_name.yellow(), v.message);
+                    }
+                    total_violations += violations.len();
+                }
+            }
+
+            if total_violations == 0 {
+                println!("\n✅ {} No se detectaron problemas estáticos.", "Perfecto:".green());
+            } else {
+                println!("\n🚩 Se detectaron {} problemas potenciales.", total_violations.to_string().red().bold());
+            }
+        }
         ProCommands::Analyze { file } => {
-            let pb = ui::crear_progreso(&format!("Analizando {} con ReviewerAgent...", file));
+            let path = agent_context.project_root.join(&file);
+            println!("\n🔍 Analizando: {}", file.cyan().bold());
 
             // Leer contenido del archivo
-            let content = match std::fs::read_to_string(&file) {
+            let content = match std::fs::read_to_string(&path) {
                 Ok(c) => c,
                 Err(e) => {
-                    pb.finish_and_clear();
                     println!("{} {}", "❌ Error al leer archivo:".bold().red(), e);
                     return;
                 }
             };
 
+            // --- CAPA 1: Análisis Estático (Tree-sitter) ---
+            let mut rule_engine = crate::rules::engine::RuleEngine::new();
+            if let Some(ref db) = agent_context.index_db {
+                rule_engine = rule_engine.with_index_db(Arc::clone(db));
+            }
+            let rules_path = agent_context.project_root.join(".sentinel/rules.yaml");
+            if rules_path.exists() {
+                let _ = rule_engine.load_from_yaml(&rules_path);
+            }
+
+            let pb_static = ui::crear_progreso("   ⚡ Ejecutando análisis estático (L1)...");
+            let static_violations = rule_engine.validate_file(&path, &content);
+            pb_static.finish_and_clear();
+
+            if !static_violations.is_empty() {
+                println!("{}", "🚩 VIOLACIONES ESTÁTICAS DETECTADAS:".red().bold());
+                for v in &static_violations {
+                    let level_icon = match v.level {
+                        RuleLevel::Error => "❌ ERROR".red(),
+                        RuleLevel::Warning => "⚠️  WARN ".yellow(),
+                        RuleLevel::Info => "ℹ️  INFO ".blue(),
+                    };
+                    println!("   {} [{}]: {}", level_icon, v.rule_name.yellow(), v.message);
+                }
+                println!();
+            } else {
+                println!("   ✅ Capa 1: No se detectaron violaciones estáticas.\n");
+            }
+
+            // --- CAPA 2: Análisis Semántico con IA ---
+            let pb_ana = ui::crear_progreso(&format!("   🤖 Consultando Guardián de IA (L2) para {}...", file));
+
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
-                description: format!("Analiza el archivo {} y reporta problemas.", file),
+                description: format!(
+                    "Actúa como el Guardián de Calidad para el archivo '{}'.\n\
+                    TU OBJETIVO: Identificar problemas profundos de arquitectura, lógica de negocio, seguridad y cuellos de botella de RENDIMIENTO que el análisis estático no puede detectar.\n\n\
+                    INSTRUCCIONES DE RESPUESTA:\n\
+                    1. Inicia con un análisis técnico detallado (incluyendo sugerencias de optimización).\n\
+                    2. FINALIZA TU RESPUESTA OBLIGATORIAMENTE con un bloque JSON (```json) que contenga un array de acciones recomendadas (objeto AuditIssue).\n\n\
+                    ESTRUCTURA DEL JSON:\n\
+                    ```json\n\
+                    [\n\
+                      {{\n\
+                        \"title\": \"Nombre de la mejora/optimización\",\n\
+                        \"description\": \"Por qué es necesaria\",\n\
+                        \"severity\": \"High/Medium/Low\",\n\
+                        \"suggested_fix\": \"Instrucción técnica para el FixSuggesterAgent\"\n\
+                      }}\n\
+                    ]\n\
+                    ```", 
+                    file
+                ),
                 task_type: TaskType::Analyze,
-                file_path: Some(std::path::PathBuf::from(&file)),
-                context: Some(content),
+                file_path: Some(path.clone()),
+                context: Some(content.clone()),
             };
 
             let result =
                 rt.block_on(orchestrator.execute_task("ReviewerAgent", &task, &agent_context));
 
-            pb.finish_and_clear();
+            pb_ana.finish_and_clear();
 
             match result {
                 Ok(res) => {
                     println!("{}", "🔍 ANÁLISIS COMPLETADO".bold().green());
-                    println!("{}", res.output);
+                    
+                    // Mostrar reporte humano (sin el código JSON)
+                    let report_only = crate::ai::utils::eliminar_bloques_codigo(&res.output);
+                    println!("{}", report_only);
+
+                    // 3. Extraer y procesar sugerencias JSON
+                    let json_str = crate::ai::utils::extraer_json(&res.output);
+                    if let Ok(issues) = serde_json::from_str::<Vec<AuditIssue>>(&json_str) {
+                         if !issues.is_empty() {
+                            println!("\n💡 Se detectaron {} acciones recomendadas.", issues.len().to_string().cyan());
+                            
+                            let options: Vec<String> = issues.iter()
+                                .map(|i| format!("[{}] {} - {}", i.severity.to_uppercase(), i.title.bold(), i.description))
+                                .collect();
+
+                            let selected = MultiSelect::with_theme(&ColorfulTheme::default())
+                                .with_prompt("Selecciona las acciones que deseas ejecutar:")
+                                .items(&options)
+                                .interact()
+                                .unwrap_or_default();
+
+                            if !selected.is_empty() {
+                                println!("\n🚀 Aplicando {} mejoras seleccionadas...", selected.len());
+                                
+                                for &idx in &selected {
+                                    let issue = &issues[idx];
+                                    println!("\n🛠️  Ejecutando: {}", issue.title.cyan().bold());
+
+                                    // Para cada fix, leemos el contenido ACTUAL (que pudo cambiar en el paso anterior)
+                                    let current_content = std::fs::read_to_string(&path).unwrap_or_else(|_| content.clone());
+                                    
+                                    let pb_fix = ui::crear_progreso("   🤖 Generando cambios...");
+                                    
+                                    let fix_task = Task {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        description: format!(
+                                            "Aplica la siguiente mejora específica al archivo {}.\n\
+                                            TÍTULO: {}\n\
+                                            DESCRIPCIÓN: {}\n\
+                                            ACCIÓN REQUERIDA: {}\n\n\
+                                            Devuelve el código COMPLETO actualizado para este archivo.",
+                                            file, issue.title, issue.description, issue.suggested_fix
+                                        ),
+                                        task_type: TaskType::Fix,
+                                        file_path: Some(path.clone()),
+                                        context: Some(current_content),
+                                    };
+
+                                    let fix_result = rt.block_on(orchestrator.execute_task("FixSuggesterAgent", &fix_task, &agent_context));
+                                    pb_fix.finish_and_clear();
+
+                                    if let Ok(f_res) = fix_result {
+                                        if let Some(code) = f_res.artifacts.first() {
+                                            if !code.trim().is_empty() {
+                                                if let Err(e) = std::fs::write(&path, code) {
+                                                    println!("   ❌ Error al guardar en {}: {}", file, e);
+                                                } else {
+                                                    println!("   ✅ Mejora '{}' aplicada.", issue.title.green());
+                                                    
+                                                    let mut s = agent_context.stats.lock().unwrap();
+                                                    s.total_analisis += 1;
+                                                    s.sugerencias_aplicadas += 1;
+                                                    s.tiempo_estimado_ahorrado_mins += 15;
+                                                    s.guardar(&agent_context.project_root);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                println!("\n✨ Todas las mejoras seleccionadas han sido procesadas.");
+                            }
+                         }
+                    } else {
+                        // Si no hay JSON o falla el parse, simplemente no mostramos el menú interactivo
+                        // pero el reporte humano ya se mostró arriba.
+                    }
                 }
                 Err(e) => {
                     println!("{} {}", "❌ Error al analizar:".bold().red(), e);
                 }
             }
         }
-        ProCommands::Generate { file } => {
-            let pb = ui::crear_progreso(&format!("Generando código para {}...", file));
+        ProCommands::Report { format } => {
+            println!("\n📊 Generando Reporte de Calidad del Proyecto...");
+            
+            let mut rule_engine = crate::rules::engine::RuleEngine::new();
+            if let Some(ref db) = agent_context.index_db {
+                rule_engine = rule_engine.with_index_db(Arc::clone(db));
+            }
+            let rules_path = agent_context.project_root.join(".sentinel/rules.yaml");
+            if rules_path.exists() {
+                let _ = rule_engine.load_from_yaml(&rules_path);
+            }
 
-            // Intentar leer contenido si existe (para contexto)
-            let content = std::fs::read_to_string(&file).ok();
+            let walker = ignore::WalkBuilder::new(&agent_context.project_root)
+                .hidden(false)
+                .git_ignore(true)
+                .build();
 
-            let task = Task {
-                id: uuid::Uuid::new_v4().to_string(),
-                description: format!("Genera el código necesario para el archivo {}.", file),
-                task_type: TaskType::Generate,
-                file_path: Some(std::path::PathBuf::from(&file)),
-                context: content,
-            };
+            let mut files_count = 0;
+            let mut total_violations = 0;
+            let mut errors = 0;
+            let mut warnings = 0;
+            let mut info = 0;
+            let mut violations_list = Vec::new();
 
-            let result =
-                rt.block_on(orchestrator.execute_task("CoderAgent", &task, &agent_context));
-
-            pb.finish_and_clear();
-
-            match result {
-                Ok(res) => {
-                    println!("{}", "🚀 CÓDIGO GENERADO".bold().green());
-
-                    // Si hay artifacts, guardarlos en el archivo
-                    if let Some(code) = res.artifacts.first() {
-                        match std::fs::write(&file, code) {
-                            Ok(_) => {
-                                println!("   💾 Archivo guardado: {}", file.cyan());
-                                // Update Stats
-                                let mut s = agent_context.stats.lock().unwrap();
-                                s.total_analisis += 1;
-                                s.sugerencias_aplicadas += 1;
-                                s.tiempo_estimado_ahorrado_mins += 10;
-                                s.guardar(&agent_context.project_root);
+            for result in walker {
+                if let Ok(entry) = result {
+                    let p = entry.path();
+                    if p.is_file() {
+                        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        if agent_context.config.file_extensions.contains(&ext.to_string()) {
+                            files_count += 1;
+                            let content = std::fs::read_to_string(p).unwrap_or_default();
+                            let file_violations = rule_engine.validate_file(p, &content);
+                            
+                            // Guardar métricas en el historial (SQLite)
+                            if let Some(ref db) = agent_context.index_db {
+                                let history = crate::index::quality_history::QualityHistory::new(db);
+                                let mut dead_func = 0;
+                                let mut unused_imp = 0;
+                                for v in &file_violations {
+                                    if v.rule_name.contains("DEAD_CODE") { dead_func += 1; }
+                                    if v.rule_name.contains("UNUSED_IMPORT") { unused_imp += 1; }
+                                }
+                                let _ = history.record_metrics(&crate::index::quality_history::FileMetrics {
+                                    file_path: p.strip_prefix(&agent_context.project_root).unwrap_or(p).to_string_lossy().to_string(),
+                                    dead_functions: dead_func,
+                                    unused_imports: unused_imp,
+                                    complexity_score: 0.0, // TODO: Extraer complejidad real
+                                    violations_count: file_violations.len() as i32,
+                                    tests_passing: true,
+                                });
                             }
-                            Err(e) => println!("   ⚠️  No se pudo guardar el archivo: {}", e),
+                            for v in &file_violations {
+                                total_violations += 1;
+                                match v.level {
+                                    crate::rules::RuleLevel::Error => errors += 1,
+                                    crate::rules::RuleLevel::Warning => warnings += 1,
+                                    crate::rules::RuleLevel::Info => info += 1,
+                                }
+                                
+                                violations_list.push(serde_json::json!({
+                                    "file": p.strip_prefix(&agent_context.project_root).unwrap_or(p).to_string_lossy(),
+                                    "rule": v.rule_name,
+                                    "message": v.message,
+                                    "level": format!("{:?}", v.level)
+                                }));
+                            }
                         }
                     }
+                }
+            }
 
-                    println!("{}", "\n📝 Explicación detallada:".bold());
-                    println!("{}", res.output);
-                }
-                Err(e) => {
-                    println!("{} {}", "❌ Error al generar:".bold().red(), e);
-                }
+            let report_data = serde_json::json!({
+                "project": agent_context.config.project_name,
+                "framework": agent_context.config.framework,
+                "timestamp": chrono::Local::now().to_rfc3339(),
+                "summary": {
+                    "total_files": files_count,
+                    "total_violations": total_violations,
+                    "errors": errors,
+                    "warnings": warnings,
+                    "info": info
+                },
+                "violations": violations_list
+            });
+
+            if format == "json" {
+                let json_output = serde_json::to_string_pretty(&report_data).unwrap();
+                let output_path = agent_context.project_root.join("sentinel-report.json");
+                std::fs::write(&output_path, json_output).expect("Error al escribir reporte JSON");
+                println!("✅ Reporte JSON generado en: {}", output_path.display().to_string().cyan());
+            } else if format == "html" {
+                 let html_template = format!(
+                     "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Sentinel Report - {project}</title>\
+                     <style>body {{ font-family: 'Segoe UI', Roboto, sans-serif; padding: 40px; background: #f8f9fa; color: #333; }}\
+                     .card {{ background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 25px; }}\
+                     h1 {{ color: #1a202c; border-bottom: 3px solid #4a90e2; padding-bottom: 12px; display: flex; align-items: center; gap: 10px; }}\
+                     .summary {{ display: flex; gap: 20px; flex-wrap: wrap; justify-content: space-between; }}\
+                     .stat {{ flex: 1; min-width: 140px; text-align: center; padding: 20px; border-radius: 10px; color: white; transition: transform 0.2s; }}\
+                     .stat:hover {{ transform: translateY(-3px); }}\
+                     .bg-blue {{ background: #4a90e2; }} .bg-red {{ background: #e53e3e; }} .bg-orange {{ background: #ed8936; }} .bg-green {{ background: #48bb78; }}\
+                     table {{ width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 20px; overflow: hidden; border-radius: 8px; border: 1px solid #eee; }}\
+                     th, td {{ padding: 14px; text-align: left; border-bottom: 1px solid #eee; }}\
+                     th {{ background-color: #f1f5f9; color: #4a5568; font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em; }}\
+                     tr:hover {{ background-color: #fdfdfd; }}\
+                     .level-error {{ color: #e53e3e; font-weight: bold; padding: 4px 8px; background: #fff5f5; border-radius: 4px; }}\
+                     .level-warning {{ color: #dd6b20; font-weight: bold; padding: 4px 8px; background: #fffaf0; border-radius: 4px; }}\
+                     .level-info {{ color: #3182ce; font-weight: bold; padding: 4px 8px; background: #ebf8ff; border-radius: 4px; }}\
+                     </style></head><body>\
+                     <h1>🛡️ Sentinel Quality Report: {project}</h1>\
+                     <div class='card summary'>\
+                        <div class='stat bg-blue'><h3>Archivos</h3><p style='font-size: 24px; font-weight: bold;'>{files}</p></div>\
+                        <div class='stat bg-red'><h3>Errores</h3><p style='font-size: 24px; font-weight: bold;'>{errors}</p></div>\
+                        <div class='stat bg-orange'><h3>Avisos</h3><p style='font-size: 24px; font-weight: bold;'>{warnings}</p></div>\
+                        <div class='stat bg-green'><h3>Info</h3><p style='font-size: 24px; font-weight: bold;'>{info}</p></div>\
+                     </div>\
+                     <div class='card'>\
+                        <h2>Hallazgos de Capa 1 ({total})</h2>\
+                        <table><thead><tr><th>Archivo</th><th>Nivel</th><th>Regla</th><th>Mensaje</th></tr></thead><tbody>",
+                     project = agent_context.config.project_name,
+                     files = files_count,
+                     errors = errors,
+                     warnings = warnings,
+                     info = info,
+                     total = total_violations
+                 );
+                 let mut rows = String::new();
+                 for v in report_data["violations"].as_array().unwrap() {
+                     let level_label = v["level"].as_str().unwrap();
+                     let level_class = match level_label {
+                         "Error" => "level-error",
+                         "Warning" => "level-warning",
+                         "Info" => "level-info",
+                         _ => "",
+                     };
+                     rows.push_str(&format!(
+                         "<tr><td><code style='color: #4a5568;'>{file}</code></td><td><span class='{class}'>{level}</span></td><td><strong style='color: #2d3748;'>{rule}</strong></td><td>{msg}</td></tr>",
+                         file = v["file"].as_str().unwrap(),
+                         class = level_class,
+                         level = level_label.to_uppercase(),
+                         rule = v["rule"].as_str().unwrap(),
+                         msg = v["message"].as_str().unwrap()
+                     ));
+                 }
+                 let final_html = format!("{}{}{}</tbody></table></div><p style='text-align: center; color: #a0aec0; font-size: 13px;'>Generado por Sentinel Pro • {date}</p></body></html>", 
+                     html_template, rows, "", date = chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+                 let output_path = agent_context.project_root.join("sentinel-report.html");
+                 std::fs::write(&output_path, final_html).expect("Error al escribir reporte HTML");
+                 println!("✅ Reporte HTML generado en: {}", output_path.display().to_string().cyan());
+            } else {
+                println!("⚠️ Formato '{}' no soportado. Usa json o html.", format);
             }
         }
         ProCommands::Refactor { file } => {
+            let path = agent_context.project_root.join(&file);
             // Leer contenido original
-            let content = match std::fs::read_to_string(&file) {
+            let content = match std::fs::read_to_string(&path) {
                 Ok(c) => c,
                 Err(e) => {
                     println!("{} {}", "❌ Error al leer archivo:".bold().red(), e);
@@ -227,8 +497,8 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             let pb = ui::crear_progreso(&format!("Refactorizando {}...", file));
 
             // Crear Backup
-            let backup_path = format!("{}.bak", file);
-            if let Err(e) = std::fs::copy(&file, &backup_path) {
+            let backup_path = path.with_extension(format!("{}.bak", path.extension().and_then(|e| e.to_str()).unwrap_or("")));
+            if let Err(e) = std::fs::copy(&path, &backup_path) {
                 pb.finish_and_clear();
                 println!("{} {}", "❌ Error al crear backup:".bold().red(), e);
                 return;
@@ -241,22 +511,22 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     file
                 ),
                 task_type: TaskType::Refactor,
-                file_path: Some(std::path::PathBuf::from(&file)),
+                file_path: Some(path.clone()),
                 context: Some(content),
             };
 
             let result =
-                rt.block_on(orchestrator.execute_task("RefactorAgent", &task, &agent_context));
+                rt.block_on(orchestrator.execute_with_guard("RefactorAgent", &task, &agent_context));
 
             pb.finish_and_clear();
 
             match result {
                 Ok(res) => {
                     println!("{}", "🛠️ REFACTORIZACIÓN COMPLETADA".bold().green());
-                    println!("   🔙 Backup creado en: {}", backup_path.dimmed());
+                    println!("   🔙 Backup creado en: {}", backup_path.display().to_string().dimmed());
 
                     if let Some(code) = res.artifacts.first() {
-                        match std::fs::write(&file, code) {
+                        match std::fs::write(&path, code) {
                             Ok(_) => {
                                 println!("   💾 Cambios aplicados a: {}", file.cyan());
                                 // Update Stats
@@ -280,8 +550,9 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             }
         }
         ProCommands::Fix { file } => {
+            let path = agent_context.project_root.join(&file);
             // Leer contenido original
-            let content = match std::fs::read_to_string(&file) {
+            let content = match std::fs::read_to_string(&path) {
                 Ok(c) => c,
                 Err(e) => {
                     println!("{} {}", "❌ Error al leer archivo:".bold().red(), e);
@@ -292,20 +563,20 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             let pb = ui::crear_progreso(&format!("Corrigiendo bugs en {}...", file));
 
             // Crear Backup
-            let backup_path = format!("{}.bak", file);
-            let _ = std::fs::copy(&file, &backup_path);
+            let backup_path = path.with_extension(format!("{}.bak", path.extension().and_then(|e| e.to_str()).unwrap_or("")));
+            let _ = std::fs::copy(&path, &backup_path);
 
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
                 description: format!("Identifica y corrige bugs en el archivo {}.", file),
                 task_type: TaskType::Fix,
-                file_path: Some(std::path::PathBuf::from(&file)),
+                file_path: Some(path.clone()),
                 context: Some(content),
             };
 
             // Usamos CoderAgent para fixes por ahora
             let result =
-                rt.block_on(orchestrator.execute_task("CoderAgent", &task, &agent_context));
+                rt.block_on(orchestrator.execute_with_guard("FixSuggesterAgent", &task, &agent_context));
 
             pb.finish_and_clear();
 
@@ -313,7 +584,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 Ok(res) => {
                     println!("{}", "🩹 BUGS CORREGIDOS".bold().green());
                     if let Some(code) = res.artifacts.first() {
-                        match std::fs::write(&file, code) {
+                        match std::fs::write(&path, code) {
                             Ok(_) => {
                                 println!("   💾 Correcciones aplicadas a: {}", file.cyan());
                                 // Update Stats
@@ -331,141 +602,6 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
                 Err(e) => {
                     println!("{} {}", "❌ Error al corregir:".bold().red(), e);
-                }
-            }
-        }
-        ProCommands::Chat => {
-            println!("{}", "💬 Sentinel Pro Chat".bold().blue());
-            println!("{}", "Escribe 'exit' o 'quit' para salir.\n".dimmed());
-
-            use std::io::{self, Write};
-
-            // Historial simple en memoria para la sesión
-            let mut conversation_history = String::new();
-
-            loop {
-                print!("{}", "You > ".bold().green());
-                io::stdout().flush().unwrap();
-
-                let mut input = String::new();
-                io::stdin().read_line(&mut input).unwrap();
-                let input = input.trim();
-
-                if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
-                    break;
-                }
-
-                if input.is_empty() {
-                    continue;
-                }
-
-                // Mostrar indicador de pensamiento
-                print!("{}", "   Thinking...".dimmed());
-                io::stdout().flush().unwrap();
-
-                // Construir prompt con historial
-                let prompt = if conversation_history.is_empty() {
-                    format!(
-                        "Eres un asistente experto en programación y en este proyecto. Responde a: {}",
-                        input
-                    )
-                } else {
-                    format!(
-                        "{}\nUser: {}\nAssistant: Responde corto y conciso.",
-                        conversation_history, input
-                    )
-                };
-
-                let config_clone = agent_context.config.clone();
-                let stats_clone = Arc::clone(&agent_context.stats);
-                let project_root = agent_context.project_root.clone();
-
-                let response_result = crate::ai::client::consultar_ia_dinamico(
-                    prompt,
-                    crate::ai::client::TaskType::Deep, // Usar Deep para mejor razonamiento en chat
-                    &config_clone,
-                    stats_clone,
-                    &project_root,
-                );
-
-                // Envolver en Ok(Ok(...)) para coincidir con el match de abajo que espera Result<Result<...>>
-                // o simplificar el match
-                let response_result: anyhow::Result<anyhow::Result<String>> = Ok(response_result);
-
-                // Borrar indicador "Thinking..." (retorno de carro + espacios)
-                print!("\r               \r");
-
-                match response_result {
-                    Ok(Ok(response)) => {
-                        print!("{}", "Sentinel > ".bold().blue());
-                        println!("{}\n", response);
-                        // Limitar historial para no exceder tokens infinitamente
-                        if conversation_history.len() > 4000 {
-                            conversation_history =
-                                conversation_history.split_off(conversation_history.len() / 2);
-                        }
-                        conversation_history
-                            .push_str(&format!("\nUser: {}\nAssistant: {}", input, response));
-                    }
-                    Ok(Err(e)) => println!("{}", format!("Error: {}", e).red()),
-                    Err(e) => println!("{}", format!("System Error: {}", e).red()),
-                }
-            }
-        }
-        ProCommands::Docs { dir } => {
-            let pb = ui::crear_progreso(&format!("Generando documentación para {}...", dir));
-
-            // Simplificado: Listar archivos y pedir un README general
-            let path = std::path::PathBuf::from(&dir);
-            if !path.exists() {
-                pb.finish_and_clear();
-                println!("{}", "❌ El directorio no existe.".red());
-                return;
-            }
-
-            // Recolectar nombres de archivos para dar contexto de estructura
-            let mut structure = String::new();
-            if let Ok(entries) = std::fs::read_dir(&path) {
-                for entry in entries.flatten() {
-                    if let Ok(name) = entry.file_name().into_string() {
-                        structure.push_str(&format!("- {}\n", name));
-                    }
-                }
-            }
-
-            let task = Task {
-                id: uuid::Uuid::new_v4().to_string(),
-                description: format!(
-                    "Genera una documentación técnica (README.md) detallada para el directorio '{}' que contiene los siguientes archivos:\n{}",
-                    dir, structure
-                ),
-                task_type: TaskType::Generate, // Reusamos Generate
-                file_path: Some(path.clone()),
-                context: Some(format!("Estructura de archivos:\n{}", structure)),
-            };
-
-            let result =
-                rt.block_on(orchestrator.execute_task("CoderAgent", &task, &agent_context));
-
-            pb.finish_and_clear();
-
-            match result {
-                Ok(res) => {
-                    println!("{}", "📚 DOCUMENTACIÓN GENERADA".bold().green());
-                    if let Some(doc_content) = res.artifacts.first() {
-                        let doc_path = path.join("PROJECT_DOCS.md");
-                        match std::fs::write(&doc_path, doc_content) {
-                            Ok(_) => println!(
-                                "   💾 Documentación guardada en: {}",
-                                doc_path.display().to_string().cyan()
-                            ),
-                            Err(e) => println!("   ⚠️  No se pudo guardar el archivo: {}", e),
-                        }
-                    }
-                    println!("\n{}", res.output);
-                }
-                Err(e) => {
-                    println!("{} {}", "❌ Error al documentar:".bold().red(), e);
                 }
             }
         }
@@ -668,7 +804,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                                                     context: Some(error_output),
                                                 };
 
-                                                let fix_result = rt.block_on(orchestrator.execute_task("CoderAgent", &fix_task, &agent_context));
+                                                let fix_result = rt.block_on(orchestrator.execute_task("FixSuggesterAgent", &fix_task, &agent_context));
                                                 pb_fix.finish_and_clear();
 
                                                 match fix_result {
@@ -725,129 +861,9 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
             }
         },
-        ProCommands::Kb { subcommand } => match subcommand {
-            crate::commands::KbCommands::Check => {
-                println!("\n🧠 {}", "CONEXIÓN KNOWLEDGE BASE".bold().cyan());
-
-                if let Some(kb) = &agent_context.config.knowledge_base {
-                    println!("   📍 URL Configurada: {}", kb.vector_db_url.dimmed());
-
-                    // Prueba de conexión real
-                    let url = kb.vector_db_url.clone();
-                    let dimension = agent_context.config.primary_model.embedding_dimension();
-
-                    match VectorDB::new(&url, dimension) {
-                        Ok(db) => {
-                            let pb = ui::crear_progreso("Verificando latencia y colecciones...");
-                            match rt.block_on(db.initialize_collection()) {
-                                Ok(_) => {
-                                    pb.finish_and_clear();
-                                    println!(
-                                        "   ✅ Estado: {}",
-                                        "CONECTADO Y LISTO".green().bold()
-                                    );
-                                }
-                                Err(e) => {
-                                    pb.finish_and_clear();
-                                    println!("   ❌ Estado: {}", "ERROR DE CONEXIÓN".red().bold());
-                                    println!("   ⚠️  Detalle: {}", e);
-
-                                    if url.contains("6333") {
-                                        println!(
-                                            "   💡 Sugerencia: El cliente Rust prefiere gRPC (puerto 6334). Prueba cambiando 6333 por 6334."
-                                        );
-                                    }
-                                    if url.contains("localhost") {
-                                        println!(
-                                            "   💡 Sugerencia: En Windows, intenta cambiar 'localhost' por '127.0.0.1'."
-                                        );
-                                    }
-                                    if e.to_string().contains("h2")
-                                        || e.to_string().contains("http2")
-                                    {
-                                        println!(
-                                            "   ✨ Tip: El error HTTP2 suele ser un conflicto de puertos. Asegúrate de usar el puerto gRPC (6334)."
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => println!("   ❌ Error al crear cliente: {}", e),
-                    }
-                } else {
-                    println!("   ❌ Estado: {}", "NO CONFIGURADO".red().bold());
-                }
-            }
-            crate::commands::KbCommands::Retry => {
-                println!("\n🔄 {}", "RE-INTENTANDO CONEXIÓN KB".bold().yellow());
-                let project_root = &agent_context.project_root;
-                let config = SentinelConfig::load(project_root).unwrap_or_default();
-
-                if let Some(kb_config) = &config.knowledge_base {
-                    let mut url = kb_config.vector_db_url.clone();
-
-                    // Auto-fix para problemas comunes de gRPC/Windows
-                    let mut modified = false;
-                    if url.contains("localhost") {
-                        url = url.replace("localhost", "127.0.0.1");
-                        modified = true;
-                    }
-                    if url.contains(":6333") {
-                        url = url.replace(":6333", ":6334");
-                        modified = true;
-                    }
-
-                    if modified {
-                        println!("   🔧 Aplicando auto-fix: Usando {}...", url.cyan());
-                    }
-
-                    match VectorDB::new(&url, config.primary_model.embedding_dimension()) {
-                        Ok(db) => {
-                            let pb = ui::crear_progreso("Iniciando conexión...");
-                            match rt.block_on(db.initialize_collection()) {
-                                Ok(_) => {
-                                    pb.finish_and_clear();
-                                    println!(
-                                        "   ✅ Conexión establecida con {} con éxito.",
-                                        url.cyan()
-                                    );
-
-                                    // Si la URL fue modificada y funcionó, persistir el cambio en el config
-                                    if modified {
-                                        let mut new_config = config.clone();
-                                        if let Some(ref mut kb) = new_config.knowledge_base {
-                                            kb.vector_db_url = url.clone();
-                                        }
-                                        if let Ok(_) = new_config.save(project_root) {
-                                            println!(
-                                                "   💾 Configuración actualizada permanentemente con la nueva URL."
-                                            );
-                                        }
-                                    }
-
-                                    println!("   🚀 KB ahora está disponible.");
-                                }
-                                Err(e) => {
-                                    pb.finish_and_clear();
-                                    println!("   ❌ Error al inicializar: {}", e);
-                                    if !modified && url.contains("6333") {
-                                        println!(
-                                            "   💡 Tip: Qdrant usa 6334 para gRPC. Intenta cambiar el puerto en tu .sentinelrc.toml"
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => println!("   ❌ Error al conectar: {}", e),
-                    }
-                } else {
-                    println!("   ⚠️  Knowledge Base no está configurado.");
-                }
-            }
-        },
         ProCommands::CleanCache { target } => {
             let path_str = target.unwrap_or_else(|| ".".to_string());
-            let target_path = std::path::PathBuf::from(&path_str);
+            let target_path = agent_context.project_root.join(&path_str);
 
             println!(
                 "🧹 {} en: {}...",
@@ -876,7 +892,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                      steps: vec![
                          WorkflowStep {
                              name: "Identificar y Corregir Bugs".to_string(),
-                             agent: "CoderAgent".to_string(),
+                             agent: "FixSuggesterAgent".to_string(),
                              task_template: TaskTemplate {
                                  description: "Analiza el archivo {file} en busca de bugs lógicos o de sintaxis. Si encuentras errores, corrígelos y devuelve el código completo corregido.".to_string(),
                                  task_type: TaskType::Fix,
@@ -914,7 +930,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                          },
                          WorkflowStep {
                              name: "Sugerencia de Mitigación".to_string(),
-                             agent: "CoderAgent".to_string(),
+                             agent: "FixSuggesterAgent".to_string(),
                              task_template: TaskTemplate {
                                  description: "Basado en el análisis de seguridad anterior, sugiere código seguro para mitigar las vulnerabilidades encontradas en {file}.".to_string(),
                                  task_type: TaskType::Generate,
@@ -945,98 +961,6 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 pb.finish_and_clear();
                 println!("{} Workflow '{}' no encontrado.", "❌".red(), name);
                 println!("   Workflows disponibles: fix-and-verify, review-security");
-            }
-        }
-        ProCommands::Migrate { src, dst } => {
-            let pb = ui::crear_progreso(&format!("Migrando {} a {}...", src, dst));
-
-            // 1. Leer archivo origen
-            let content = match std::fs::read_to_string(&src) {
-                Ok(c) => c,
-                Err(e) => {
-                    pb.finish_and_clear();
-                    println!("{} {}", "❌ Error al leer archivo origen:".bold().red(), e);
-                    return;
-                }
-            };
-
-            // 2. Construir tarea de migración
-            let task = Task {
-                id: uuid::Uuid::new_v4().to_string(),
-                description: format!(
-                    "TU TAREA ES MIGRAR CÓDIGO.\n\
-                    ORIGEN: Archivo '{}'\n\
-                    DESTINO: Framework '{}'\n\n\
-                    OBJETIVO: Reescribe el código fuente completamente para que funcione en el framework destino.\n\
-                    REGLAS:\n\
-                    1. ADAPTA la estructura (ej: de funciones Express a Clases NestJS con Decoradores).\n\
-                    2. MANTÉN la lógica de negocio intacta.\n\
-                    3. Si el destino es 'nestjs', usa Inyección de Dependencias, DTOs y Decoradores (@Controller, @Get).\n\
-                    4. Si el destino es 'react', migra a Functional Components con Hooks.\n\
-                    5. Genera todo el código necesario (imports, clase, export).",
-                    src, dst
-                ),
-                task_type: TaskType::Generate, // Generate es más apropiado que Refactor para cambios drásticos
-                file_path: Some(std::path::PathBuf::from(&src)),
-                context: Some(format!("CÓDIGO A MIGRAR:\n{}", content)),
-            };
-
-            // 3. Ejecutar agente
-            let result =
-                rt.block_on(orchestrator.execute_task("CoderAgent", &task, &agent_context));
-
-            pb.finish_and_clear();
-
-            // 4. Procesar resultado
-            match result {
-                Ok(res) => {
-                    println!("{}", "🔄 MIGRACIÓN GENERADA".bold().green());
-
-                    // Sugerir nombre de archivo destino
-                    let nueva_ext = match dst.to_lowercase().as_str() {
-                        "nestjs" | "angular" | "ts" => "ts",
-                        "react" | "nextjs" => "tsx",
-                        "rust" => "rs",
-                        "python" => "py",
-                        _ => "ts", // Default
-                    };
-
-                    let path_origen = std::path::Path::new(&src);
-                    let nombre_base = path_origen.file_stem().unwrap().to_str().unwrap();
-                    let nuevo_nombre = format!("{}.migrated.{}", nombre_base, nueva_ext);
-
-                    if let Some(code) = res.artifacts.first() {
-                        println!("\n{}", code);
-
-                        println!("\n{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".dimmed());
-                        use std::io::{self, Write};
-                        print!("💾 ¿Guardar como '{}'? (s/n): ", nuevo_nombre.cyan());
-                        io::stdout().flush().unwrap();
-
-                        let mut input = String::new();
-                        io::stdin().read_line(&mut input).unwrap();
-
-                        if input.trim().to_lowercase() == "s" {
-                            if let Err(e) = std::fs::write(&nuevo_nombre, code) {
-                                println!("❌ Error al guardar: {}", e);
-                            } else {
-                                println!("✅ Archivo guardado: {}", nuevo_nombre.green());
-                                // Update Stats
-                                let mut s = agent_context.stats.lock().unwrap();
-                                s.total_analisis += 1;
-                                s.sugerencias_aplicadas += 1;
-                                s.tiempo_estimado_ahorrado_mins += 60;
-                                s.guardar(&agent_context.project_root);
-                            }
-                        }
-                    } else {
-                        println!("⚠️  El agente no generó código válido.");
-                        println!("{}", res.output);
-                    }
-                }
-                Err(e) => {
-                    println!("{} {}", "❌ Error en migración:".bold().red(), e);
-                }
             }
         }
         ProCommands::Review => {
@@ -1083,9 +1007,24 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 description: "Realiza una auditoría técnica de alto nivel del proyecto. \n\
                               TU OBJETIVO: Evaluar la arquitectura, organización y stack tecnológico.\n\
                               1. Analiza la estructura de directorios: ¿Sigue buenas prácticas (DDD, Clean Arch, MVC)?\n\
-                              2. Analiza las dependencias: ¿Hay librerías obsoletas o redundantes? ¿El stack es coherente?\n\
-                              3. Identifica posibles cuellos de botella o deuda técnica basada en la organización.\n\
-                              4. Sugiere mejoras arquitectónicas.".to_string(),
+                              2. Analiza las dependencias.\n\
+                              3. Identifica cuellos de botella o deuda técnica.\n\n\
+                              INSTRUCCIONES DE SALIDA:\n\
+                              - Primero escribe tu análisis detallado en lenguaje humano.\n\
+                              - AL FINAL DE TODO, añade un bloque de código JSON con sugerencias que el usuario pueda seleccionar para desarrollar.\n\
+                              - NO incluyas explicaciones dentro del bloque JSON.\n\n\
+                              ESTRUCTURA DEL JSON (Obligatorio):\n\
+                              ```json\n\
+                              [\n\
+                                {\n\
+                                  \"title\": \"Título breve\",\n\
+                                  \"description\": \"Descripción de la mejora\",\n\
+                                  \"impact\": \"High/Medium/Low\",\n\
+                                  \"action_item\": \"Instrucción técnica para el CoderAgent\",\n\
+                                  \"files_involved\": [\"ruta/al/archivo\"]\n\
+                                }\n\
+                              ]\n\
+                              ```".to_string(),
                 task_type: TaskType::Analyze,
                 file_path: None,
                 context: Some(format!(
@@ -1105,93 +1044,127 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                         "{}",
                         "🏗️  AUDITORÍA DE ARQUITECTURA COMPLETADA".bold().green()
                     );
-                    println!("{}", res.output);
+                    
+                    // Mostrar solo el texto humano, ocultar el JSON del output principal
+                    let report_only = crate::ai::utils::eliminar_bloques_codigo(&res.output);
+                    println!("{}", report_only);
+
+                    // 3. Extraer y procesar sugerencias JSON
+                    let json_str = crate::ai::utils::extraer_json(&res.output);
+                    if let Ok(mut suggestions) = serde_json::from_str::<Vec<ReviewSuggestion>>(&json_str) {
+                         while !suggestions.is_empty() {
+                            println!("\n💡 {} sugerencias de mejora detectadas.", suggestions.len().to_string().cyan());
+                            
+                            let mut options: Vec<String> = suggestions.iter()
+                                .map(|s| format!("[{}] {} - {}", s.impact.to_uppercase(), s.title.bold(), s.description))
+                                .collect();
+                            
+                            options.push("🚪 Salir".to_string());
+
+                            let selection = Select::with_theme(&ColorfulTheme::default())
+                                .with_prompt("Selecciona una sugerencia para desarrollar:")
+                                .items(&options)
+                                .default(0)
+                                .interact_opt()
+                                .unwrap_or(None);
+
+                            match selection {
+                                Some(idx) if idx < suggestions.len() => {
+                                    let suggestion = &suggestions[idx];
+                                    println!("\n🚀 Desarrollando: {}", suggestion.title.cyan().bold());
+                                    
+                                    // Ejecutar implementación
+                                    let pb_dev = ui::crear_progreso(&format!("Aplicando mejora: {}...", suggestion.title));
+                                    
+                                    let dev_task = Task {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        description: format!(
+                                            "IMPLEMENTACIÓN DE MEJORA ARQUITECTÓNICA\n\n\
+                                            TÍTULO: {}\n\
+                                            DESCRIPCIÓN: {}\n\
+                                            ACCIÓN REQUERIDA: {}\n\n\
+                                            OBJETIVO: Realiza los cambios necesarios en el proyecto para implementar esta mejora. \
+                                            Si se mencionan archivos específicos ({:?}), priorízalos. \
+                                            Devuelve el código COMPLETO corregido o las nuevas implementaciones.",
+                                            suggestion.title, suggestion.description, suggestion.action_item, suggestion.files_involved
+                                        ),
+                                        task_type: TaskType::Fix,
+                                        file_path: suggestion.files_involved.first().map(|f| std::path::PathBuf::from(f)),
+                                        context: None,
+                                    };
+
+                                    let dev_result = rt.block_on(orchestrator.execute_task("FixSuggesterAgent", &dev_task, &agent_context));
+                                    pb_dev.finish_and_clear();
+
+                                    match dev_result {
+                                        Ok(d_res) => {
+                                            println!("{}", "\n✨ MEJORA GENERADA".bold().green());
+                                            
+                                            if let Some(code) = d_res.artifacts.first() {
+                                                if !code.trim().is_empty() {
+                                                    println!("\n{}", code);
+                                                    
+                                                    let apply = dialoguer::Confirm::new()
+                                                        .with_prompt("¿Deseas aplicar estos cambios automáticamente?")
+                                                        .default(true)
+                                                        .interact()
+                                                        .unwrap_or(false);
+                                                        
+                                                    if apply {
+                                                        if let Some(file_path_str) = suggestion.files_involved.first() {
+                                                            let file_path = agent_context.project_root.join(file_path_str);
+                                                            if let Some(parent) = file_path.parent() {
+                                                                let _ = std::fs::create_dir_all(parent);
+                                                            }
+                                                            
+                                                            if let Err(e) = std::fs::write(&file_path, code) {
+                                                                println!("   ❌ Error al guardar en {}: {}", file_path.display(), e);
+                                                            } else {
+                                                                println!("   ✅ Cambios aplicados con éxito en {}.", file_path_str.green());
+                                                                
+                                                                let mut s = agent_context.stats.lock().unwrap();
+                                                                s.sugerencias_aplicadas += 1;
+                                                                s.tiempo_estimado_ahorrado_mins += 30;
+                                                                s.guardar(&agent_context.project_root);
+                                                                
+                                                                // ELIMINAR LA SUGERENCIA YA APLICADA
+                                                                suggestions.remove(idx);
+                                                            }
+                                                        } else {
+                                                            println!("   ⚠️ No se especificó un archivo de destino en la sugerencia. Por favor, aplica los cambios manualmente.");
+                                                            // Aun así la quitamos para no repetir el prompt si el usuario no puede hacer nada
+                                                            suggestions.remove(idx);
+                                                        }
+                                                    }
+                                                } else {
+                                                    println!("{}", d_res.output);
+                                                }
+                                            } else {
+                                                println!("{}", d_res.output);
+                                            }
+                                        },
+                                        Err(e) => println!("{} {}", "\n❌ Error al desarrollar la sugerencia:".red(), e),
+                                    }
+                                },
+                                _ => break, // Salir del loop (Selección de "Salir" o Esc)
+                            }
+                         }
+                         if suggestions.is_empty() {
+                             println!("\n✨ {} Todas las sugerencias han sido procesadas o aplicadas.", "Review completado:".green());
+                         }
+                    } else {
+                        println!("\n{} No se pudo procesar el bloque de sugerencias inteligentes.", "⚠️".yellow());
+                    }
                 }
                 Err(e) => {
                     println!("{} {}", "❌ Error en Review:", e);
                 }
             }
         }
-        ProCommands::Explain { file } => {
-            let pb = ui::crear_progreso(&format!("Analizando {} para explicación...", file));
-
-            let content = match std::fs::read_to_string(&file) {
-                Ok(c) => c,
-                Err(e) => {
-                    pb.finish_and_clear();
-                    println!("{} {}", "❌ Error al leer archivo:".bold().red(), e);
-                    return;
-                }
-            };
-
-            let task = Task {
-                id: uuid::Uuid::new_v4().to_string(),
-                description: format!(
-                    "Explica detalladamente qué hace este código, cómo funciona y sus puntos clave. Sé didáctico."
-                ),
-                task_type: TaskType::Analyze, // Analyze fits well for explanation
-                file_path: Some(std::path::PathBuf::from(&file)),
-                context: Some(content),
-            };
-
-            // Usamos CoderAgent porque suele ser mejor explicando lógica de código
-            let result =
-                rt.block_on(orchestrator.execute_task("CoderAgent", &task, &agent_context));
-
-            pb.finish_and_clear();
-
-            match result {
-                Ok(res) => {
-                    println!("{}", "📘 EXPLICACIÓN DE CÓDIGO".bold().cyan());
-                    println!("{}", res.output);
-                }
-                Err(e) => {
-                    println!("{} {}", "❌ Error al explicar:", e);
-                }
-            }
-        }
-        ProCommands::Optimize { file } => {
-            let pb = ui::crear_progreso(&format!("Buscando optimizaciones en {}...", file));
-
-            let content = match std::fs::read_to_string(&file) {
-                Ok(c) => c,
-                Err(e) => {
-                    pb.finish_and_clear();
-                    println!("{} {}", "❌ Error al leer archivo:".bold().red(), e);
-                    return;
-                }
-            };
-
-            let task = Task {
-                id: uuid::Uuid::new_v4().to_string(),
-                description: format!(
-                    "Analiza el código en busca de cuellos de botella de rendimiento, uso ineficiente de memoria o complejidad algorítmica innecesaria. Sugiere optimizaciones concretas."
-                ),
-                task_type: TaskType::Analyze,
-                file_path: Some(std::path::PathBuf::from(&file)),
-                context: Some(content),
-            };
-
-            // ReviewerAgent es bueno encontrando problemas
-            let result =
-                rt.block_on(orchestrator.execute_task("ReviewerAgent", &task, &agent_context));
-
-            pb.finish_and_clear();
-
-            match result {
-                Ok(res) => {
-                    println!("{}", "⚡ REPORTE DE OPTIMIZACIÓN".bold().yellow());
-                    println!("{}", res.output);
-                }
-                Err(e) => {
-                    println!("{} {}", "❌ Error al optimizar:", e);
-                }
-            }
-        }
         ProCommands::Audit { target } => {
-            let path = std::path::PathBuf::from(&target);
+            let path = agent_context.project_root.join(&target);
             if !path.exists() {
-                println!("{} El destino '{}' no existe.", "❌".red(), target);
+                println!("{} El destino '{}' no existe en el proyecto.", "❌".red(), target);
                 return;
             }
 
@@ -1365,7 +1338,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
                 let pb = ui::crear_progreso("   🤖 Generando parche...");
                 let result =
-                    rt.block_on(orchestrator.execute_task("CoderAgent", &fix_task, &agent_context));
+                    rt.block_on(orchestrator.execute_task("FixSuggesterAgent", &fix_task, &agent_context));
                 pb.finish_and_clear();
 
                 if let Ok(res) = result {

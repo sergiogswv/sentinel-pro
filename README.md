@@ -16,27 +16,24 @@
 
 ---
 
-## 🚀 What is Sentinel?
+## 🚀 What is Sentinel Pro?
 
-Real-time monitoring tool written in **Rust** that analyzes code changes using **multiple AI providers** (Claude, Gemini, etc.) and manages workflow with Git. Designed for **NestJS/TypeScript** projects as an intelligent development assistant.
+Sentinel Pro is the **AI-Powered Quality Guardian** for modern software development. Unlike traditional generators, Sentinel focuses on **ensuring the integrity, security, and architectural consistency** of your codebase in real-time.
 
-### ✨ Key Features (Pro Edition)
+It acts as a silent partner that monitors every change, providing a two-layered defense:
+1. **Layer 1: High-Speed Static Analysis** (Powered by Tree-sitter) - Instant detection of dead code, complexity, and pattern violations (<100ms).
+2. **Layer 2: AI Semantic Review** (Powered by LLMs) - Deep understanding of business logic, security vulnerabilities, and architectural design.
 
-- 🤖 **Advanced AI Orchestration** - Native support for **Ollama**, **LM Studio**, Claude, and Gemini
-- 🏗️ **Framework Rule Engine** - YAML-based architecture validation (Pre-AI)
-- 🧠 **Local Knowledge Base** - Code indexing and vector store for deep context
-- ⚡ **Pro CLI Commands** - `analyze`, `generate`, `refactor`, `fix`, `chat`
-- 👥 **Multi-Agent System** - Specialized agents (Coder, Reviewer) for complex tasks
-- 💾 **Smart Caching** - Reduces API costs up to 70%
-- 📊 **Real-time Metrics** - Tracking bugs, costs, tokens, and productivity
-- 🧪 **Autonomous Testing** - AI-assisted test generation and execution
-- 🔄 **Advanced Workflows** - Multi-step automation (Fix & Verify, Review & Mitigate)
-- 🚀 **Framework Migration** - Intelligent code translation between frameworks
-- 🔎 **Interactive Project Audit** - Recursive auditing with selective batch fixing (New!)
-- 🎯 **Parent File Detection** - Automatically finds parent modules
-- 📚 **Auto-documentation** - Generates technical manuals automatically
-- 🔒 **Security Pro** - Local LLM support for 100% offline privacy
-- 🚑 **Smart-Heal & Discovery** - Auto-fixes Qdrant connections and finds project root recursively (New!)
+### ✨ Key Features (Quality Guardian Edition)
+
+- 🛡️ **Two-Layer Analysis** - Hybrid approach combining ultra-fast static rules with deep AI reasoning.
+- 🤖 **AI Code Quality Guardian** - Specialized agents like **FixSuggesterAgent** and **ReviewerAgent**.
+- 🏗️ **Framework Rule Engine** - Validates architectural patterns (NestJS, React, etc.) before they hit production.
+- 🧠 **Local Knowledge Base** - Deep project context via RAG (Retrieval-Augmented Generation).
+- 💾 **Smart Caching** - Drastically reduces API costs by remembering previous reviews.
+- 📊 **Real-time ROI Metrics** - Visibility into bugs prevented and engineering time saved.
+- 🧪 **Autonomous Testing** - AI-assisted validation of every code modification.
+- 🔒 **Privacy First** - Support for local models (Ollama/LM Studio) for 100% offline analysis.
 
 ---
 
@@ -45,65 +42,37 @@ Real-time monitoring tool written in **Rust** that analyzes code changes using *
 ### Requirements
 
 - [Rust](https://www.rust-lang.org/tools/install) (edition 2024)
-- API Key from [Claude](https://console.anthropic.com) or [Gemini](https://makersuite.google.com/app/apikey)
-- NestJS project with Jest configured
+- API Key from [Claude](https://console.anthropic.com), [Gemini](https://makersuite.google.com/app/apikey), or a local LLM.
+- Project with `tree-sitter` supported languages (TS, JS, etc.)
 
 ### Installation
 
-#### Windows (PowerShell)
-```powershell
-git clone https://github.com/your-username/sentinel-rust.git
-cd sentinel-rust
-./install.ps1
-```
-*(Note: You may need to restart your terminal after installation for the `sentinel` command to be recognized)*
-
-#### Linux / macOS
+#### Linux / macOS / Windows (WSL)
 ```bash
 git clone https://github.com/your-username/sentinel-rust.git
 cd sentinel-rust
 cargo build --release
 ```
 
-On first use, Sentinel will start an **interactive configuration wizard**.
-
 ---
 
 ## 🎮 Available Commands
 
-Once started, Sentinel responds to these commands:
-
-| Command | Action |
-|---------|--------|
-| `p` | Pause/Resume monitoring |
-| `r` | Generate daily report |
-| `m` | View metrics (bugs, costs, tokens) |
-| `l` | Clear cache |
-| `t` | Ask AI for test suggestions |
-| `k` | **Retry Knowledge Base connection** (Hot-reload) |
-| `h` | Show help |
-| `x` | Reset configuration |
-
 ### Pro CLI Commands
 
-Access advanced features using the `pro` sub-command:
+Access the Quality Guardian suite using the `pro` sub-command:
 
 ```bash
-# Core Commands
-sentinel pro analyze <file>   # Deep architectural analysis (Reviewer Agent)
-sentinel pro generate <file>  # Generate code from local context (Coder Agent)
-sentinel pro refactor <file>  # Proactive refactoring suggestions (Coder Agent)
-sentinel pro fix <file>       # Intelligent bug fixing
-sentinel pro chat             # Interactive codebase chat
-
-# Advanced Workflow Commands (New!)
-sentinel pro workflow <name>  # Execute multi-step workflows (e.g., fix-and-verify)
-sentinel pro migrate <s, d>   # Migrate code between frameworks (Pro)
-sentinel pro review           # Full project terminology & architectural audit
-sentinel pro explain <file>   # Didactic code explanation
-sentinel pro audit <path>     # Recursive project audit & interactive fixes (New!)
-sentinel pro optimize <file>  # Performance optimization suggestions
-sentinel pro docs <dir>       # Generates comprehensive Markdown documentation for a directory
+# Core Quality Commands
+sentinel pro analyze <file>   # Hybrid Analysis (Static L1 + AI L2 hallazgos)
+sentinel pro fix <file>       # Propose precise fixes for detected issues (FixSuggester)
+sentinel pro refactor <file>  # Suggested improvements for maintainability
+sentinel pro test-all         # Generate and verify missing tests (Tester)
+sentinel pro audit <path>     # Recursive project-wide quality & security audit
+sentinel pro review           # Full architectural consistency check
+sentinel pro explain <file>   # Didactic breakdown of complex logic
+sentinel pro optimize <file>  # Performance and resource usage suggestions
+sentinel pro workflow <name>  # Multi-step automation (e.g., fix-and-verify)
 ```
 
 💡 **Tip:** On startup, Sentinel automatically displays the command list.

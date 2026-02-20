@@ -1,0 +1,37 @@
+framework: Laravel
+language: php
+rules:
+  - name: "No dd() or dump()"
+    description: "No usar dd() ni dump() en producción"
+    patterns:
+      - "dd("
+      - "dump("
+    forbidden_patterns: []
+    required_imports: []
+    level: Error
+  - name: "Use Eloquent instead of raw SQL"
+    description: "Evitar DB::raw() o DB::statement()"
+    patterns:
+      - "DB::raw("
+      - "DB::statement("
+    forbidden_patterns: []
+    required_imports: []
+    level: Warning
+
+architecture_patterns:
+  - name: Controller
+    selector: "app/Http/Controllers/**/*Controller.php"
+    expected_parent: null
+    expected_layer: "Presentation"
+  - name: Model
+    selector: "app/Models/**/*.php"
+    expected_parent: null
+    expected_layer: "Data"
+  - name: Migration
+    selector: "database/migrations/**/*.php"
+    expected_parent: null
+    expected_layer: "Data"
+  - name: Request
+    selector: "app/Http/Requests/**/*.php"
+    expected_parent: null
+    expected_layer: "Validation"

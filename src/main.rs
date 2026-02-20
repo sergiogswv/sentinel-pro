@@ -8,19 +8,20 @@ use clap::Parser;
 use commands::{Cli, Commands};
 
 // Módulos
-mod agents;
-mod ai;
-mod commands;
-mod config;
-mod docs;
-mod files;
-mod git;
-mod kb;
-mod ml;
-mod rules;
-mod stats;
-mod tests;
-mod ui;
+pub mod agents;
+pub mod ai;
+pub mod commands;
+pub mod config;
+pub mod docs;
+pub mod files;
+pub mod git;
+pub mod index;
+pub mod business_logic_guard;
+pub mod ml;
+pub mod rules;
+pub mod stats;
+pub mod tests;
+pub mod ui;
 
 fn main() {
     let cli = Cli::parse();

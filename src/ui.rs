@@ -11,7 +11,6 @@ use crate::stats::SentinelStats;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 /// Muestra el banner ASCII art de Sentinel al inicio del programa
 pub fn mostrar_banner() {
@@ -169,20 +168,24 @@ pub fn mostrar_ayuda(config: Option<&SentinelConfig>) {
             .bold()
     );
     println!(
+        "  sentinel pro check <target>   {}",
+        "Análisis estático ultra-rápido (Gratis)".dimmed()
+    );
+    println!(
         "  sentinel pro analyze <file>   {}",
-        "Análisis arquitectónico (Reviewer)".dimmed()
+        "Análisis profundo (Capa 1 + 2)".dimmed()
     );
     println!(
-        "  sentinel pro generate <file>  {}",
-        "Generación de código (Coder)".dimmed()
-    );
-    println!(
-        "  sentinel pro refactor <file>  {}",
-        "Refactorización (Refactor)".dimmed()
+        "  sentinel pro report           {}",
+        "Generar reporte de calidad (JSON/HTML)".dimmed()
     );
     println!(
         "  sentinel pro fix <file>       {}",
-        "Corrección de bugs".dimmed()
+        "Corrección inteligente de bugs".dimmed()
+    );
+    println!(
+        "  sentinel pro refactor <file>  {}",
+        "Refactorización (FixSuggester)".dimmed()
     );
     println!(
         "  sentinel pro test-all         {}",
@@ -193,18 +196,14 @@ pub fn mostrar_ayuda(config: Option<&SentinelConfig>) {
         "Auditoría interactiva + Fixes".dimmed()
     );
     println!(
-        "  sentinel pro chat             {}",
-        "Chat con el codebase".dimmed()
-    );
-    println!(
-        "  sentinel pro docs <dir>       {}",
-        "Generar documentación".dimmed()
-    );
-    println!(
         "{}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".bright_cyan()
     );
     println!("{}", "🔮 COMANDOS AVANZADOS".bright_magenta().bold());
+    println!(
+        "  sentinel pro review           {}",
+        "Review completo (Arquitectura)".dimmed()
+    );
     println!(
         "  sentinel pro workflow <name>  {}",
         "Ejecutar workflows:".dimmed()
@@ -216,22 +215,6 @@ pub fn mostrar_ayuda(config: Option<&SentinelConfig>) {
     println!(
         "  {}",
         "                                  - review-security (Audit + Mitigate)".dimmed()
-    );
-    println!(
-        "  sentinel pro migrate <s, d>   {}",
-        "Migrar código entre frameworks".dimmed()
-    );
-    println!(
-        "  sentinel pro review           {}",
-        "Auditoría completa de proyecto".dimmed()
-    );
-    println!(
-        "  sentinel pro explain <file>   {}",
-        "Explicación didáctica de código".dimmed()
-    );
-    println!(
-        "  sentinel pro optimize <file>  {}",
-        "Sugerencias de optimización".dimmed()
     );
     println!(
         "{}",
@@ -499,9 +482,6 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
                 embeddings_model: "codebert".to_string(),
                 bug_predictor_model: "bug-predictor-v1".to_string(),
             });
-
-            // Configurar KB con asesoramiento
-            configurar_knowledge_base(&mut config);
         }
 
         config
@@ -541,8 +521,6 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
         }
     };
 
-    // --- Verificación Pro-activa de Qdrant (v5.0 Pro) ---
-    verificar_qdrant_proactivo(&mut config, project_path);
 
     // Si ya existe configuración y el framework no ha cambiado, no molestamos con re-detección
     // EXCEPTO para testing si no está configurado.
@@ -634,111 +612,6 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
     println!("{}", "✅ Configuración actualizada.".green());
 
     config
-}
-
-/// Verifica si Qdrant está en ejecución y ofrece iniciarlo si se detecta localmente.
-fn verificar_qdrant_proactivo(config: &mut SentinelConfig, project_path: &Path) {
-    // --- Verificación Pro-activa de Qdrant (v5.0 Pro) ---
-    // Se ejecuta siempre, incluso si el framework no cambió, para asegurar que el motor vectorial esté listo.
-    if let Some(ref mut kb) = config.knowledge_base {
-        if kb.index_on_start {
-            // 1. Intentar conectar a la URL configurada
-            let mut current_url_valid = false;
-            let target = kb
-                .vector_db_url
-                .replace("http://", "")
-                .replace("https://", "");
-            if let Some((host, port_str)) = target.split_once(':') {
-                let port = port_str.parse::<u16>().unwrap_or(6334);
-                let actual_host = if host == "localhost" {
-                    "127.0.0.1"
-                } else {
-                    host
-                };
-
-                if let Ok(addr) =
-                    format!("{}:{}", actual_host, port).parse::<std::net::SocketAddr>()
-                {
-                    current_url_valid =
-                        std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300))
-                            .is_ok();
-                }
-            }
-
-            let mut is_running = current_url_valid;
-
-            // 2. Si falló, intentar con el "Heal" (127.0.0.1:6334)
-            if !is_running
-                && (kb.vector_db_url.contains("localhost") || kb.vector_db_url.contains("6333"))
-            {
-                let healed_addr: std::net::SocketAddr = "127.0.0.1:6334".parse().unwrap();
-                if std::net::TcpStream::connect_timeout(&healed_addr, Duration::from_millis(300))
-                    .is_ok()
-                {
-                    println!(
-                        "   🔧 {} Detectado Qdrant en 127.0.0.1:6334. Actualizando configuración...",
-                        "Auto-Fix:".cyan()
-                    );
-                    kb.vector_db_url = "http://127.0.0.1:6334".to_string();
-                    is_running = true;
-                    // Persistir el cambio inmediatamente
-                    let _ = config.save(project_path);
-                }
-            }
-
-            if !is_running {
-                let sentinel_home = SentinelConfig::get_sentinel_home();
-                let qdrant_bin = if cfg!(windows) {
-                    sentinel_home.join("qdrant").join("qdrant.exe")
-                } else {
-                    sentinel_home.join("qdrant").join("qdrant")
-                };
-
-                if qdrant_bin.exists() {
-                    println!(
-                        "\n🧠 {}",
-                        "Knowledge Base: Qdrant no está en ejecución.".yellow()
-                    );
-                    let iniciar = dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                        .with_prompt("Se detectó una instalación local de Qdrant. ¿Deseas iniciarla en segundo plano?")
-                        .default(true)
-                        .interact()
-                        .unwrap_or(false);
-
-                    if iniciar {
-                        println!("   🚀 Iniciando Qdrant...");
-                        let success = if cfg!(windows) {
-                            // En Windows, a veces Start-Process es caprichoso.
-                            // Intentamos simplemente ejecutarlo con spawn para que herede el entorno.
-                            Command::new("powershell")
-                                .args([
-                                    "-NoProfile",
-                                    "-Command",
-                                    &format!(
-                                        "Start-Job -ScriptBlock {{ & '{}' }}",
-                                        qdrant_bin.display()
-                                    ),
-                                ])
-                                .status()
-                                .is_ok()
-                        } else {
-                            Command::new("sh")
-                                .arg("-c")
-                                .arg(format!("'{}' > /dev/null 2>&1 &", qdrant_bin.display()))
-                                .status()
-                                .is_ok()
-                        };
-
-                        if success {
-                            println!("   ✅ Comando de inicio enviado.");
-                            println!("   ℹ️  Si no conecta, puedes iniciarlo manualmente con:");
-                            println!("      {}", format!("'{}'", qdrant_bin.display()).cyan());
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// Ayuda al usuario a configurar un framework de testing si no se detectó uno válido
@@ -878,146 +751,7 @@ fn ayudar_configurar_testing(config: &mut SentinelConfig, testing_info: ai::Test
     }
 }
 
-/// Verifica si Docker está instalado en el sistema
-fn verificar_docker() -> bool {
-    std::process::Command::new("docker")
-        .arg("--version")
-        .output()
-        .is_ok()
-}
 
-/// Asesor de configuración para la Knowledge Base (Qdrant)
-fn configurar_knowledge_base(config: &mut SentinelConfig) {
-    println!(
-        "\n🧠 {}",
-        "Configuración de Knowledge Base".bright_magenta().bold()
-    );
-    println!("   Sentinel utiliza Qdrant para dar 'memoria' a la IA sobre todo tu proyecto.");
-
-    // 1. Verificar si ya está corriendo
-    if std::net::TcpStream::connect_timeout(
-        &"127.0.0.1:6334".parse().unwrap(),
-        Duration::from_millis(500),
-    )
-    .is_ok()
-    {
-        println!("   ✅ Qdrant ya está en ejecución y respondiendo.");
-        config.knowledge_base = Some(crate::config::KnowledgeBaseConfig {
-            vector_db_url: "http://127.0.0.1:6334".to_string(),
-            index_on_start: true,
-        });
-        return;
-    }
-
-    // 2. Verificar si existe instalación en el home de Sentinel
-    let sentinel_home = SentinelConfig::get_sentinel_home();
-    let qdrant_bin = if cfg!(windows) {
-        sentinel_home.join("qdrant").join("qdrant.exe")
-    } else {
-        sentinel_home.join("qdrant").join("qdrant")
-    };
-
-    let has_docker = verificar_docker();
-    let bin_exists = qdrant_bin.exists();
-
-    let mut options = vec![];
-    if bin_exists {
-        options.push("Iniciar Qdrant local (Detectado en .sentinel-pro)");
-    }
-    if has_docker {
-        options.push("Ejecutar vía Docker");
-    }
-    options.push("Descargar/Reinstalar desde GitHub");
-    options.push("Ignorar por ahora (Modo Offline)");
-
-    let selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("¿Cómo deseas configurar el motor vectorial Qdrant?")
-        .items(&options)
-        .default(0)
-        .interact()
-        .unwrap_or(options.len() - 1);
-
-    let selected_text = &options[selection];
-
-    if selected_text.contains("Ignorar") {
-        println!("\n⚠️  {}", "Modo Offline seleccionado.".yellow());
-        config.knowledge_base = Some(crate::config::KnowledgeBaseConfig {
-            vector_db_url: "http://127.0.0.1:6334".to_string(),
-            index_on_start: false,
-        });
-        return;
-    }
-
-    if selected_text.contains("Iniciar Qdrant local") {
-        println!("   🚀 Iniciando Qdrant en segundo plano...");
-        let success = if cfg!(windows) {
-            Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-Command",
-                    &format!("Start-Job -ScriptBlock {{ & '{}' }}", qdrant_bin.display()),
-                ])
-                .status()
-                .is_ok()
-        } else {
-            Command::new("sh")
-                .arg("-c")
-                .arg(format!("'{}' > /dev/null 2>&1 &", qdrant_bin.display()))
-                .status()
-                .is_ok()
-        };
-
-        if success {
-            println!("   ✅ Comando de inicio enviado.");
-            println!("   ℹ️  Puede tardar unos segundos en estar listo.");
-            println!(
-                "   ℹ️  Comando manual: {}",
-                format!("'{}'", qdrant_bin.display()).cyan()
-            );
-        } else {
-            println!("   ❌ Error al enviar comando de inicio.");
-        }
-    } else if selected_text.contains("Docker") {
-        println!("\n🚀 Ejecutando Qdrant vía Docker en segundo plano...");
-        let status = Command::new("docker")
-            .args([
-                "run",
-                "-d",
-                "--name",
-                "sentinel-qdrant",
-                "-p",
-                "6333:6333",
-                "-p",
-                "6334:6334",
-                "qdrant/qdrant",
-            ])
-            .status();
-
-        if let Ok(s) = status {
-            if s.success() {
-                println!("   ✅ Contenedor Docker iniciado.");
-            } else {
-                println!(
-                    "   ⚠️  El comando Docker falló. Asegúrate de que el puerto 6333 esté libre."
-                );
-            }
-        }
-    } else if selected_text.contains("GitHub") {
-        println!("\n📦 Instalación manual (Sin Docker):");
-        println!(
-            "   1. Descarga el binario de: {}",
-            "https://github.com/qdrant/qdrant/releases".underline()
-        );
-        println!("   2. Ejecútalo antes de iniciar Sentinel.");
-    }
-
-    config.knowledge_base = Some(crate::config::KnowledgeBaseConfig {
-        vector_db_url: "http://127.0.0.1:6334".to_string(),
-        index_on_start: true,
-    });
-
-    println!("\n✅ Configuración de Knowledge Base guardada.");
-}
 
 /// Helper para mostrar una barra de progreso genérica
 pub fn crear_progreso(mensaje: &str) -> indicatif::ProgressBar {

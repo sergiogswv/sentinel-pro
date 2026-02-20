@@ -24,15 +24,21 @@ pub enum Commands {
 
 #[derive(Subcommand)]
 pub enum ProCommands {
-    /// Análisis profundo e interactivo de un archivo
+    /// Capa 1: Análisis estático rápido (Dead code, unused imports, complexity)
+    Check {
+        /// Archivo o carpeta a revisar
+        target: String,
+    },
+    /// Análisis profundo (Capa 1 + Capa 2) e interactivo de un archivo
     Analyze {
         /// Archivo a analizar
         file: String,
     },
-    /// Generación de código nuevo mediante IA
-    Generate {
-        /// Archivo a generar o donde insertar
-        file: String,
+    /// Genera un reporte de calidad completo del proyecto
+    Report {
+        /// Formato del reporte (json o html)
+        #[arg(long, default_value = "json")]
+        format: String,
     },
     /// Refactorización automática de código
     Refactor {
@@ -46,32 +52,8 @@ pub enum ProCommands {
     },
     /// Ejecución de tests con asistencia de IA
     TestAll,
-    /// Explicación detallada de código
-    Explain {
-        /// Archivo a explicar
-        file: String,
-    },
-    /// Chat interactivo con el código
-    Chat,
-    /// Review completo del proyecto
+    /// Review completo del proyecto (Arquitectura y Coherencia)
     Review,
-    /// Generación de documentación técnica
-    Docs {
-        /// Directorio a documentar
-        dir: String,
-    },
-    /// Migración entre frameworks
-    Migrate {
-        /// Origen
-        src: String,
-        /// Destino
-        dst: String,
-    },
-    /// Optimización de performance
-    Optimize {
-        /// Archivo a optimizar
-        file: String,
-    },
     /// Ejecutar un workflow definido
     Workflow {
         /// Nombre del workflow (ej: fix-and-verify)
@@ -94,19 +76,6 @@ pub enum ProCommands {
         /// Archivo, directorio a limpiar (opcional, por defecto todo el proyecto)
         target: Option<String>,
     },
-    /// Gestión de la Knowledge Base (Qdrant)
-    Kb {
-        #[command(subcommand)]
-        subcommand: KbCommands,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum KbCommands {
-    /// Verifica la conexión con Qdrant
-    Check,
-    /// Intenta re-inicializar la conexión con el motor vectorial
-    Retry,
 }
 
 #[derive(Subcommand)]

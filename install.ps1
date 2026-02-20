@@ -117,53 +117,6 @@ max_tokens = 4000
     Show-Success "Archivo de configuración creado en $configFile"
 }
 
-# --- SECCIÓN QDRANT ---
-Write-Host ""
-$choice = Read-Host "❓ ¿Deseas instalar Qdrant (Vector Database) automáticamente? (s/n)"
-if ($choice -eq 's' -or $choice -eq 'S') {
-    Show-Info "Iniciando instalación de Qdrant..."
-    
-    $qdrantBaseDir = "$installDir\qdrant"
-    if (-not (Test-Path $qdrantBaseDir)) {
-        New-Item -ItemType Directory -Path $qdrantBaseDir -Force | Out-Null
-    }
-
-    try {
-        Show-Info "Obteniendo última versión de Qdrant desde GitHub..."
-        $githubApiUrl = "https://api.github.com/repos/qdrant/qdrant/releases/latest"
-        $latestRelease = Invoke-RestMethod -Uri $githubApiUrl -UseBasicParsing
-        $version = $latestRelease.tag_name
-        
-        $downloadUrl = "https://github.com/qdrant/qdrant/releases/download/$version/qdrant-x86_64-pc-windows-msvc.zip"
-        $zipFile = "$qdrantBaseDir\qdrant.zip"
-        
-        Show-Info "Descargando Qdrant $version..."
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipFile
-        
-        Show-Info "Extrayendo archivos..."
-        Expand-Archive -Path $zipFile -DestinationPath $qdrantBaseDir -Force
-        Remove-Item $zipFile
-        
-        # Crear script de inicio rápido para Qdrant
-        $qdrantRunScript = "$qdrantBaseDir\run-qdrant.ps1"
-        $runContent = @"
-# Script para iniciar Qdrant localmente
-Set-Location -Path "`$PSScriptRoot"
-.\qdrant.exe
-"@
-        Set-Content -Path $qdrantRunScript -Value $runContent -Encoding UTF8
-        
-        Show-Success "Qdrant instalado en $qdrantBaseDir"
-        Show-Info "Puedes iniciarlo ejecutando: $qdrantRunScript"
-        
-        $installQdrantPath = $true
-    } catch {
-        Show-Error "No se pudo instalar Qdrant automáticamente: $($_.Exception.Message)"
-    }
-} else {
-    Show-Info "Omitiendo instalación automática de Qdrant. Puedes instalarlo manualmente después."
-    $installQdrantPath = $false
-}
 
 # Mostrar mensaje de éxito
 Write-Host ""

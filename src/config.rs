@@ -73,11 +73,6 @@ pub struct MlConfig {
     pub bug_predictor_model: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct KnowledgeBaseConfig {
-    pub vector_db_url: String,
-    pub index_on_start: bool,
-}
 
 impl Default for ModelConfig {
     fn default() -> Self {
@@ -119,8 +114,6 @@ pub struct SentinelConfig {
     pub local_llm: Option<LocalLlmConfig>,
     #[serde(default)]
     pub ml: Option<MlConfig>,
-    #[serde(default)]
-    pub knowledge_base: Option<KnowledgeBaseConfig>,
 }
 
 impl SentinelConfig {
@@ -181,10 +174,6 @@ impl SentinelConfig {
                 models_path: ".sentinel/models".to_string(),
                 embeddings_model: "codebert".to_string(),
                 bug_predictor_model: "bug-predictor-v1".to_string(),
-            }),
-            knowledge_base: Some(KnowledgeBaseConfig {
-                vector_db_url: "http://127.0.0.1:6334".to_string(),
-                index_on_start: true,
             }),
         }
     }
@@ -303,7 +292,7 @@ impl SentinelConfig {
 
             let framework = old_config
                 .framework
-                .unwrap_or_else(|| "JavaScript/TypeScript".to_string());
+                .unwrap_or_else(|| Self::detectar_framework(path));
 
             let rules = old_config.architecture_rules.unwrap_or_else(|| {
                 vec![
@@ -506,12 +495,6 @@ impl SentinelConfig {
             });
         }
 
-        if config.knowledge_base.is_none() {
-            config.knowledge_base = Some(KnowledgeBaseConfig {
-                vector_db_url: "http://127.0.0.1:6334".to_string(),
-                index_on_start: true,
-            });
-        }
 
         if config.ml.is_none() {
             config.ml = Some(MlConfig {
@@ -526,11 +509,6 @@ impl SentinelConfig {
             config.primary_model.url = format!("http://{}", config.primary_model.url);
         }
 
-        if let Some(kb) = &mut config.knowledge_base {
-            if !kb.vector_db_url.contains("://") && !kb.vector_db_url.is_empty() {
-                kb.vector_db_url = format!("http://{}", kb.vector_db_url);
-            }
-        }
 
         config
     }
@@ -571,6 +549,31 @@ impl SentinelConfig {
         } else {
             "npm".to_string()
         }
+    }
+
+    pub fn detectar_framework(project_root: &Path) -> String {
+        // Django: manage.py + settings.py o manage.py
+        if project_root.join("manage.py").exists() {
+            return "django".to_string();
+        }
+        // Laravel: artisan
+        if project_root.join("artisan").exists() {
+            return "laravel".to_string();
+        }
+        // Spring: pom.xml con spring-boot o build.gradle con spring
+        if project_root.join("pom.xml").exists() || project_root.join("build.gradle").exists() {
+            if let Ok(content) = fs::read_to_string(project_root.join("pom.xml")) {
+                if content.contains("spring-boot") {
+                    return "spring".to_string();
+                }
+            }
+        }
+        // NestJS: nest-cli.json o package.json con @nestjs/core
+        if project_root.join("nest-cli.json").exists() {
+            return "nestjs".to_string();
+        }
+        // Default
+        "typescript".to_string()
     }
 
     /// Lista los archivos en la raíz del proyecto (excluyendo node_modules, .git, etc.)

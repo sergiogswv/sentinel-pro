@@ -43,12 +43,17 @@ impl ReviewerAgent {
             2. Performance y eficiencia.\n\
             3. legibilidad y mantenimiento (Clean Code).\n\
             4. Patrones de diseño adecuados para el framework.\n\
-            5. Manejo de errores.\n\n\
-            FORMATO DE RESPUESTA:\n\
-            - Inicia con un resumen ejecutivo (Aprobado/Requiere Cambios).\n\
-            - Lista los hallazgos clasificados por severidad (Alta, Media, Baja).\n\
-            - Proporciona ejemplos de código corregido si es necesario.\n",
+            5. Manejo de errores.\n",
         );
+
+        if !task.description.contains("FORMATO") && !task.description.contains("JSON") {
+            prompt.push_str(
+                "\nFORMATO DE RESPUESTA:\n\
+                - Inicia con un resumen ejecutivo (Aprobado/Requiere Cambios).\n\
+                - Lista los hallazgos clasificados por severidad (Alta, Media, Baja).\n\
+                - Proporciona ejemplos de código corregido si es necesario.\n",
+            );
+        }
 
         prompt
     }
@@ -65,26 +70,13 @@ impl Agent for ReviewerAgent {
     }
 
     async fn execute(&self, task: &Task, context: &AgentContext) -> anyhow::Result<TaskResult> {
-        println!(
-            "   🧐 ReviewerAgent: Revisando tarea '{}'...",
-            task.description
-        );
+        println!("   🧐 ReviewerAgent: Iniciando revisión del proyecto...");
 
-        // Intentar obtener contexto relevante de la Knowledge Base
-        let mut rag_context = String::new();
-        if let Some(kb) = &context.context_builder {
-            print!("{}", "   🧠 Consultando Knowledge Base...".dimmed());
-            match kb.build_context(&task.description, 3, true).await {
-                Ok(ctx) => {
-                    rag_context = ctx;
-                    println!("{}", " OK".green());
-                }
-                Err(e) => {
-                    println!("{}", " Error".red());
-                    eprintln!("      Error consultando KB: {}", e);
-                }
-            }
-        }
+        let rag_context = if let Some(path) = &task.file_path {
+            context.build_rag_context(path)
+        } else {
+            String::new()
+        };
 
         let prompt_context = if rag_context.is_empty() {
             None
