@@ -148,25 +148,41 @@ Enfoque: Escalabilidad de auditoría y medición de valor.
   - [x] Spinner flicker-free y auto-limpiable.
   - [x] Estabilización de consola en carga de modelos pesados.
 
-## Fase 9: Monetización y Subscripciones (SaaS)
+## Fase 9: Smart Discovery y Auto-Healing
+Estado: ✅ COMPLETADO (Febrero 2025)
+Enfoque: Resiliencia de infraestructura y facilidad de instalación.
+
+- [x] **9.1 Smart Project Discovery**
+  - [x] Búsqueda recursiva de `.sentinelrc.toml` en directorios padres.
+  - [x] Persistencia de "Proyecto Activo" para ejecución remota.
+- [x] **9.2 KB Smart-Heal**
+  - [x] Auto-detección de errores de puerto (6333 vs 6334) y protocolo (h2).
+  - [x] Auto-fix persistente de URL en configuración.
+  - [x] Atajo caliente `k` para re-conexión de KB.
+- [x] **9.3 Paridad de Instaladores**
+  - [x] Sincronización de `install.sh` y `install.ps1`.
+  - [x] Instalación global vía `cargo install`.
+  - [x] Descarga automatizada de Qdrant en todas las plataformas.
+
+## Fase 10: Monetización y Subscripciones (SaaS)
 Estado: 📅 PENDIENTE
 Enfoque: Licenciamiento comercial y Trial System.
 
-- [ ] **8.1 Sistema de Licenciamiento Core**
+- [ ] **10.1 Sistema de Licenciamiento Core**
   - [ ] Implementar validación local criptográfica de licencia.
   - [ ] Sistema de tracking de "Device ID" para Periodo de Trial (7 días).
   - [ ] Comandos CLI de licencia (`activate`, `info`).
 
-- [ ] **8.2 Integración Backend / Pasarela de Pagos**
+- [ ] **10.2 Integración Backend / Pasarela de Pagos**
   - [ ] Configurar Stripe/Lemon Squeezy Webhooks.
   - [ ] Servidor para creación de Key/License en la nube tras la compra.
   - [ ] Base de Datos para Control de Usuarios.
 
-- [ ] **8.3 Hardening Anti-Piracy**
+- [ ] **10.3 Hardening Anti-Piracy**
   - [ ] Chequeos de validación periódicos (Grace Period offline).
   - [ ] Cifrado estático y validación de integridad.
 
-- [ ] **8.4 Experiencia de Usuario (Trial)**
+- [ ] **10.4 Experiencia de Usuario (Trial)**
   - [ ] Intercepción en `init` para crear Trial automático.
   - [ ] Notificaciones in-CLI sobre días de prueba restantes.
   - [ ] Bloqueo automático de features Pro post-trial.

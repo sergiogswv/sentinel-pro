@@ -49,87 +49,94 @@ success "Rust encontrado: $(rustc --version)"
 RUST_VERSION=$(rustc --version | awk '{print $2}')
 info "Versión de Rust: $RUST_VERSION"
 
-# Compilar el proyecto
-info "Compilando Sentinel Pro..."
-cargo build --release || error "Falló la compilación del proyecto"
-success "Compilación exitosa"
+# Compilar e instalar globalmente vía Cargo
+info "Compilando e instalando Sentinel Pro globalmente con cargo..."
+cargo install --path . --force || error "Falló la instalación vía cargo"
+success "Sentinel instalado en su directorio de binarios de Rust (~/.cargo/bin)"
 
-# Crear directorio de instalación
-# Preferimos ~/.local/bin si existe, sino ~/.sentinel-pro
+# Crear directorio de recursos de Sentinel
 INSTALL_DIR="$HOME/.sentinel-pro"
-BIN_NAME="sentinel"
+info "Configurando directorio de recursos en $INSTALL_DIR..."
+mkdir -p "$INSTALL_DIR"
 
-if [ -d "$HOME/.local/bin" ] && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
-    INSTALL_DIR="$HOME/.local/bin"
-    info "Detectado ~/.local/bin en el PATH. Instalando allí..."
-else
-    info "Creando directorio de instalación en $INSTALL_DIR..."
-    mkdir -p "$INSTALL_DIR"
-fi
-
-# Copiar el binario
-info "Instalando binario en $INSTALL_DIR..."
-# Limpiar binarios antiguos (homologación)
-if [ -f "$INSTALL_DIR/sentinel-pro" ]; then
-    info "Eliminando binario antiguo (sentinel-pro)..."
-    rm "$INSTALL_DIR/sentinel-pro"
-fi
-
-cp target/release/sentinel "$INSTALL_DIR/$BIN_NAME" || error "Falló la copia del binario"
-chmod +x "$INSTALL_DIR/$BIN_NAME"
-success "Binario instalado en $INSTALL_DIR/$BIN_NAME"
-
-# Agregar al PATH si no está
+# Agregar ~/.cargo/bin al PATH si no está (solo una vez)
 SHELL_RC=""
-if [ -f "$HOME/.bashrc" ]; then
-    SHELL_RC="$HOME/.bashrc"
-elif [ -f "$HOME/.zshrc" ]; then
-    SHELL_RC="$HOME/.zshrc"
+if [ -f "$HOME/.bashrc" ]; then SHELL_RC="$HOME/.bashrc"; elif [ -f "$HOME/.zshrc" ]; then SHELL_RC="$HOME/.zshrc"; fi
+
+if [ -n "$SHELL_RC" ] && ! grep -q ".cargo/bin" "$SHELL_RC"; then
+    info "Asegurando que .cargo/bin esté en el PATH en $SHELL_RC..."
+    echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$SHELL_RC"
+    success "PATH actualizado en $SHELL_RC"
 fi
 
-if [ -n "$SHELL_RC" ]; then
-    if ! grep -q "sentinel" "$SHELL_RC"; then
-        info "Agregando Sentinel al PATH en $SHELL_RC..."
-        echo "" >> "$SHELL_RC"
-        echo "# Sentinel Pro" >> "$SHELL_RC"
-        echo "export PATH=\"\$HOME/.sentinel-pro:\$PATH\"" >> "$SHELL_RC"
-        success "PATH actualizado. Por favor ejecuta: source $SHELL_RC"
-    else
-        info "Sentinel ya está en el PATH"
-    fi
-fi
+# Crear directorio para la Knowledge Base
+CONFIG_DIR="$HOME/.sentinel-pro"
+mkdir -p "$CONFIG_DIR"
 
 # Crear archivo de configuración de ejemplo si no existe
-CONFIG_FILE="$HOME/.sentinel-rust/sentinel.toml"
+CONFIG_FILE="$CONFIG_DIR/sentinel.toml"
 if [ ! -f "$CONFIG_FILE" ]; then
     info "Creando archivo de configuración de ejemplo..."
     cat > "$CONFIG_FILE" << 'EOF'
-# Configuración de Sentinel Rust
-# Copia este archivo a la raíz de tu proyecto y personalízalo
-
+# Configuración de Sentinel Pro
 [sentinel]
 framework = "Rust"
 code_language = "rust"
 
-# Reglas de arquitectura específicas
-architecture_rules = [
-    "Usa Result<T, E> para manejo de errores",
-    "Evita unwrap() en código de producción",
-    "Implementa traits apropiados (Debug, Clone, etc.)",
-    "Usa ownership correctamente para evitar clones innecesarios",
-    "Documenta funciones públicas con ///"
-]
+[knowledge_base]
+vector_db_url = "http://127.0.0.1:6334"
+index_on_start = true
 
-# Configuración de la API de IA
 [ai]
 api_key = "tu-api-key-aqui"
-model = "claude-3-5-sonnet-20241022"
-max_tokens = 4000
+model = "claude-3-5-sonnet"
 EOF
     success "Archivo de configuración creado en $CONFIG_FILE"
 fi
 
+# --- SECCIÓN QDRANT (Linux/macOS) ---
 echo ""
+read -p "❓ ¿Deseas instalar Qdrant (Vector Database) automáticamente? (s/n): " choice
+if [[ "$choice" == "s" || "$choice" == "S" ]]; then
+    info "Iniciando instalación de Qdrant..."
+    QDRANT_DIR="$INSTALL_DIR/qdrant"
+    mkdir -p "$QDRANT_DIR"
+    
+    # Detectar arquitectura y OS
+    OS_TYPE=$(uname -s | tr '[:upper:]' '[:lower:]')
+    ARCH_TYPE=$(uname -m)
+    
+    if [[ "$OS_TYPE" == "darwin" ]]; then
+        DOWNLOAD_NAME="qdrant-x86_64-apple-darwin.tar.gz" # Default para Mac
+        if [[ "$ARCH_TYPE" == "arm64" ]]; then DOWNLOAD_NAME="qdrant-aarch64-apple-darwin.tar.gz"; fi
+    else
+        DOWNLOAD_NAME="qdrant-x86_64-unknown-linux-gnu.tar.gz"
+        if [[ "$ARCH_TYPE" == "aarch64" ]]; then DOWNLOAD_NAME="qdrant-aarch64-unknown-linux-gnu.tar.gz"; fi
+    fi
+
+    info "Obteniendo última versión desde GitHub..."
+    LATEST_TAG=$(curl -s https://api.github.com/repos/qdrant/qdrant/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    
+    info "Descargando Qdrant $LATEST_TAG..."
+    curl -L "https://github.com/qdrant/qdrant/releases/download/$LATEST_TAG/$DOWNLOAD_NAME" -o "$QDRANT_DIR/qdrant.tar.gz"
+    
+    info "Extrayendo..."
+    tar -xzf "$QDRANT_DIR/qdrant.tar.gz" -C "$QDRANT_DIR"
+    rm "$QDRANT_DIR/qdrant.tar.gz"
+    chmod +x "$QDRANT_DIR/qdrant"
+    
+    # Crear script de inicio
+    cat > "$QDRANT_DIR/run-qdrant.sh" << 'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+./qdrant
+EOF
+    chmod +x "$QDRANT_DIR/run-qdrant.sh"
+    
+    success "Qdrant instalado en $QDRANT_DIR"
+    info "Puedes iniciarlo manualmente con: $QDRANT_DIR/run-qdrant.sh"
+fi
+
 echo -e "${GREEN}"
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║                                                           ║"
@@ -140,18 +147,14 @@ echo -e "${NC}"
 echo ""
 echo -e "${BLUE}📋 Próximos pasos:${NC}"
 echo ""
-echo "1. Recarga tu shell:"
+echo "1. Recarga tu terminal o ejecuta:"
 echo -e "   ${YELLOW}source $SHELL_RC${NC}"
 echo ""
-echo "2. Configura tu API key de Claude:"
-echo -e "   ${YELLOW}Edita: $CONFIG_FILE${NC}"
+echo "2. Configura tu API key en:"
+echo -e "   ${YELLOW}$CONFIG_FILE${NC}"
 echo ""
-echo "3. Copia sentinel.toml a tu proyecto:"
-echo -e "   ${YELLOW}cp $CONFIG_FILE /ruta/a/tu/proyecto/${NC}"
-echo ""
-echo "4. Ejecuta Sentinel en tu proyecto:"
-echo -e "   ${YELLOW}cd /ruta/a/tu/proyecto${NC}"
+echo "3. Ejecuta Sentinel en tu proyecto:"
 echo -e "   ${YELLOW}sentinel${NC}"
 echo ""
-echo -e "${GREEN}🎉 ¡Disfruta de Sentinel Rust!${NC}"
+echo -e "${GREEN}🎉 ¡Disfruta de Sentinel Pro!${NC}"
 echo ""

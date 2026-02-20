@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.0.0--pro.beta.2-purple.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-5.0.0--pro.beta.3-purple.svg" alt="Version">
   <img src="https://img.shields.io/badge/rust-2024-orange.svg" alt="Rust">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
 </p>
@@ -36,6 +36,7 @@ Real-time monitoring tool written in **Rust** that analyzes code changes using *
 - 🎯 **Parent File Detection** - Automatically finds parent modules
 - 📚 **Auto-documentation** - Generates technical manuals automatically
 - 🔒 **Security Pro** - Local LLM support for 100% offline privacy
+- 🚑 **Smart-Heal & Discovery** - Auto-fixes Qdrant connections and finds project root recursively (New!)
 
 ---
 
@@ -79,6 +80,7 @@ Once started, Sentinel responds to these commands:
 | `m` | View metrics (bugs, costs, tokens) |
 | `l` | Clear cache |
 | `t` | Ask AI for test suggestions |
+| `k` | **Retry Knowledge Base connection** (Hot-reload) |
 | `h` | Show help |
 | `x` | Reset configuration |
 
@@ -214,7 +216,8 @@ Phase 5: ✅ Completed - CLI Dispatcher, Local LLMs & Rules Engine (v5.0.0-pro)
 Phase 6: ✅ Completed - Local Knowledge Base & Vector Search (v5.0.0-pro.alpha.4)
 Phase 7: ✅ Completed - AI Multi-Agent System (Architect, QA, Dev) (v5.0.0-pro.beta.1)
 Phase 8: ✅ Completed - Project Audit & ROI System (v5.0.0-pro.beta.2)
-Phase 9: 📅 Planned - Monetization & Licensing (SaaS)
+Phase 9: ✅ Completed - Smart Discovery, KB Auto-Healing & Installer Parity (v5.0.0-pro.beta.3)
+Phase 10: 📅 Planned - Monetization & Licensing (SaaS)
 ```
 
 [View complete roadmap →](docs/roadmap.md)

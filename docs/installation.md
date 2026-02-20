@@ -19,20 +19,19 @@ cd sentinel-rust
 ### 2. General Installation (Quickest)
 
 #### Windows (PowerShell)
-The easiest way to install Sentinel on Windows is using the provided PowerShell script. Open PowerShell as Administrator and run:
+The easiest way to install Sentinel on Windows is using the provided PowerShell script. Open PowerShell and run:
 
 ```powershell
 ./install.ps1
 ```
-*This script will compile the project, install the binary in `~/.sentinel-pro`, and add it to your user PATH.*
-
-> 💡 **Tip:** If the command `sentinel` is not recognized immediately after running the script, try closing and reopening your terminal. In PowerShell, you can also run `$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")` to refresh the PATH without restarting.
+*This script will use `cargo install` to install Sentinel globally, set up its resources in `~/.sentinel-pro`, and handle Qdrant installation.*
 
 #### Linux / macOS
 ```bash
 chmod +x install.sh
 ./install.sh
 ```
+*This script will install Sentinel via `cargo install`, configure your shell (bash/zsh) PATH, and offer to download Qdrant.*
 
 ### 3. Manual Installation (Alternative)
 
@@ -64,7 +63,7 @@ When running `install.ps1`, you will be asked if you want to install Qdrant auto
 If you prefer to do it yourself:
 1. Download Qdrant from the [official GitHub releases](https://github.com/qdrant/qdrant/releases).
 2. Extract the binary and run it before starting Sentinel if you want to use the Knowledge Base features.
-3. Sentinel expects Qdrant to be running at `http://localhost:6333` by default.
+3. Sentinel expects Qdrant to be running at `http://127.0.0.1:6334` by default (gRPC port).
 
 ## Initial Configuration
 

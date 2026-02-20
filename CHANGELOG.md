@@ -5,6 +5,28 @@ All notable changes to Sentinel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0-pro.beta.3] - 2026-02-20
+
+### 🚑 Smart Discovery & KB Auto-Healing (Fase 9)
+
+#### Infrastructure Resiliency
+- **Smart Project Discovery**: Sentinel now recursively searches for `.sentinelrc.toml` in parent directories and persists the "Active Project" globally. You can now run `sentinel` or `sentinel pro` from any subdirectory.
+- **KB Smart-Heal**: Automatic detection and recovery for Qdrant connection issues (especially HTTP/2 protocol errors on Windows). 
+- **Auto-Fix Persistence**: When a connection issue is resolved (e.g., swapping `localhost:6333` for `127.0.0.1:6334`), the updated configuration is automatically saved to the project's config file.
+- **Hot KB Reload**: Added `k` keyboard shortcut in monitor mode to trigger a KB connection retry and background re-initialization without restarting the process.
+
+#### Cross-Platform Parity
+- **Synchronized Installers**: Both `install.ps1` (Windows) and `install.sh` (Linux/macOS) now share the same feature set:
+  - Official `cargo install --path . --force` based installation for global availability.
+  - Automatic Qdrant binary download and setup (Support for x86_64 and ARM64/Apple Silicon).
+  - Automated `PATH` environment variable management.
+- **Improved gRPC defaults**: Default Qdrant URL updated to `http://127.0.0.1:6334` across all templates and migration scripts to ensure gRPC compatibility.
+
+#### Bug Fixes
+- Resolved `Default` trait collision in configuration modules.
+- Fixed missing `Duration` imports in the Pro command handling.
+- Improved URL parsing logic in the UI module to avoid external crate dependencies.
+
 ## [5.0.0-pro.beta.2] - 2026-02-19
 
 ### 🔎 Project Audit & ROI System (Fase 8)
