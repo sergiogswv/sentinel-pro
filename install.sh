@@ -69,6 +69,13 @@ if [ -n "$SHELL_RC" ] && ! grep -q ".cargo/bin" "$SHELL_RC"; then
     success "PATH actualizado en $SHELL_RC"
 fi
 
+# Eliminar alias antiguos que apunten a versiones anteriores
+if [ -n "$SHELL_RC" ] && grep -q "alias sentinel=" "$SHELL_RC"; then
+    info "Eliminando alias antiguo de Sentinel en $SHELL_RC..."
+    sed -i.bak '/alias sentinel=/d' "$SHELL_RC"
+    success "Alias antiguo eliminado de $SHELL_RC"
+fi
+
 # Crear directorio para la Knowledge Base
 CONFIG_DIR="$HOME/.sentinel-pro"
 mkdir -p "$CONFIG_DIR"
@@ -149,6 +156,7 @@ echo -e "${BLUE}📋 Próximos pasos:${NC}"
 echo ""
 echo "1. Recarga tu terminal o ejecuta:"
 echo -e "   ${YELLOW}source $SHELL_RC${NC}"
+echo -e "   (Nota: Si la terminal sigue ejecutando una versión antigua, usa: ${YELLOW}hash -r${NC})"
 echo ""
 echo "2. Configura tu API key en:"
 echo -e "   ${YELLOW}$CONFIG_FILE${NC}"

@@ -553,7 +553,10 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
-                description: "Analiza el proyecto y genera un plan de pruebas unitarias priorizado. Enfócate en los archivos listados que no tienen cobertura.".to_string(),
+                description: "Analiza el proyecto y genera pruebas unitarias para los archivos que no tienen cobertura. \
+                              IMPORTANTE 1: Todos los tests generados deben apuntar obligatoriamente a la carpeta raíz `test/` (o su equivalente), NO dentro de root/src. \
+                              IMPORTANTE 2: Para cada archivo generado, envuelve el código en un bloque markdown y la PRIMERA LÍNEA del código DEBE ser un comentario con la ruta de destino. \
+                              Ejemplo: // test/components/auth.spec.ts".to_string(),
                 task_type: TaskType::Test,
                 file_path: None,
                 context: Some(context_msg),
@@ -567,12 +570,124 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 Ok(res) => {
                     println!("{}", "🧪 PLAN DE PRUEBAS GENERADO".bold().green());
                     // Mostrar artifacts (código extraído)
-                    for artifact in res.artifacts {
+                    for artifact in &res.artifacts {
                         println!("\n{}\n", artifact);
                     }
 
                     println!("{}", "\n📝 Detalles:".bold());
                     println!("{}", res.output);
+
+                    let ok = dialoguer::Confirm::new()
+                        .with_prompt("¿Deseas guardar automáticamente los tests generados en tu proyecto?")
+                        .default(false)
+                        .interact()
+                        .unwrap_or(false);
+
+                    if ok {
+                        let mut saved = 0;
+                        let mut current_block = String::new();
+                        let mut in_block = false;
+
+                        for line in res.output.lines() {
+                            if line.starts_with("```") {
+                                if in_block {
+                                    // procesar bloque
+                                    let mut lines = current_block.lines();
+                                    if let Some(first_line) = lines.next() {
+                                        let trimmed = first_line.trim();
+                                        if trimmed.starts_with("//") || trimmed.starts_with("#") {
+                                            let path_str = trimmed
+                                                .trim_start_matches(|c| c == '/' || c == '#' || c == ' ')
+                                                .to_string();
+                                                
+                                            if path_str.contains('.') {
+                                                let target = agent_context.project_root.join(&path_str);
+                                                if let Some(parent) = target.parent() {
+                                                    let _ = std::fs::create_dir_all(parent);
+                                                }
+                                                if let Ok(_) = std::fs::write(&target, &current_block) {
+                                                    println!("   💾 Test guardado: {}", path_str.cyan());
+                                                    saved += 1;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    current_block.clear();
+                                    in_block = false;
+                                } else {
+                                    in_block = true;
+                                }
+                            } else if in_block {
+                                current_block.push_str(line);
+                                current_block.push('\n');
+                            }
+                        }
+
+                        if saved > 0 {
+                            println!("{}", format!("✅ {} archivos de prueba guardados.", saved).green());
+
+                            // NUEVO: Preguntar para ejecutar tests y auto-fix
+                            let run_tests = dialoguer::Confirm::new()
+                                .with_prompt("¿Deseas ejecutar los tests ahora y solucionar problemas si fallan?")
+                                .default(false)
+                                .interact()
+                                .unwrap_or(false);
+
+                            if run_tests {
+                                let ref test_cmd = agent_context.config.test_command;
+                                println!("🚀 Ejecutando tests: {}", test_cmd.cyan());
+
+                                let mut cmd_parts = test_cmd.split_whitespace();
+                                if let Some(program) = cmd_parts.next() {
+                                    let args: Vec<&str> = cmd_parts.collect();
+                                    
+                                    let output_result = std::process::Command::new(program)
+                                        .args(&args)
+                                        .current_dir(&agent_context.project_root)
+                                        .output();
+
+                                    match output_result {
+                                        Ok(out) => {
+                                            if out.status.success() {
+                                                println!("{}", "✅ Todos los tests pasaron exitosamente.".green());
+                                            } else {
+                                                let error_output = String::from_utf8_lossy(&out.stderr).to_string() 
+                                                    + &String::from_utf8_lossy(&out.stdout).to_string();
+                                                    
+                                                println!("{}", "❌ Algunos tests fallaron. Intentando auto-arreglar...".red());
+                                                
+                                                let pb_fix = ui::crear_progreso("Diagnosticando el fallo con AI...");
+                                                let fix_task = Task {
+                                                    id: uuid::Uuid::new_v4().to_string(),
+                                                    description: format!(
+                                                        "Acabamos de generar y ejecutar tests, pero fallaron con esta salida:\n\n{}\n\nRevisa el error, encuentra el fallo lógico y proporciona SOLO el código corregido.", 
+                                                        error_output
+                                                    ),
+                                                    task_type: TaskType::Fix,
+                                                    file_path: None,
+                                                    context: Some(error_output),
+                                                };
+
+                                                let fix_result = rt.block_on(orchestrator.execute_task("CoderAgent", &fix_task, &agent_context));
+                                                pb_fix.finish_and_clear();
+
+                                                match fix_result {
+                                                    Ok(f_res) => {
+                                                        println!("{}", "🩹 SUGERENCIAS DE CORRECCIÓN".bold().green());
+                                                        println!("{}", f_res.output);
+                                                    },
+                                                    Err(e) => println!("{} {}", "❌ Error al intentar aplicar fix:".red(), e),
+                                                }
+                                            }
+                                        },
+                                        Err(e) => println!("{} {}", "❌ Error del sistema al intentar ejecutar tests:".red(), e),
+                                    }
+                                }
+                            }
+                        } else {
+                            println!("{}", "⚠️ No se pudo extraer automáticamente las rutas. Recuerda que la IA debe poner el nombre del archivo como comentario en la primera línea.".yellow());
+                        }
+                    }
                 }
                 Err(e) => {
                     println!("{} {}", "❌ Error al generar tests:".bold().red(), e);
