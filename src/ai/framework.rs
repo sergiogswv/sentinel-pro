@@ -7,7 +7,7 @@ use crate::ai::client::{consultar_ia, TaskType};
 use crate::config::{FrameworkDetection, SentinelConfig};
 use crate::stats::SentinelStats;
 use colored::*;
-use reqwest::blocking::Client;
+
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex};
 pub fn detectar_framework_con_ia(
     project_path: &Path,
     config: &SentinelConfig,
+    stats: Arc<Mutex<SentinelStats>>,
 ) -> anyhow::Result<FrameworkDetection> {
     println!("{}", "🤖 Detectando framework con IA...".magenta());
 
@@ -92,7 +93,7 @@ pub fn detectar_framework_con_ia(
     let respuesta = consultar_ia(
         prompt_inicial,
         &config.primary_model,
-        Arc::new(Mutex::new(SentinelStats::default())),
+        Arc::clone(&stats),
         TaskType::Deep,
     )?;
 
@@ -136,7 +137,7 @@ pub fn detectar_framework_con_ia(
             let respuesta_final = consultar_ia(
                 prompt_con_contenido,
                 &config.primary_model,
-                Arc::new(Mutex::new(SentinelStats::default())),
+                Arc::clone(&stats),
                 TaskType::Deep,
             )?;
 
@@ -190,31 +191,85 @@ fn parsear_deteccion_framework(respuesta: &str) -> anyhow::Result<FrameworkDetec
     }
 }
 
-/// Obtiene el listado de modelos disponibles en Gemini.
-pub fn listar_modelos_gemini(api_key: &str) -> anyhow::Result<Vec<String>> {
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models?key={}",
-        api_key
-    );
-    let client = Client::new();
-    let response = client.get(&url).send()?;
+/// Obtiene el listado de modelos disponibles para cualquier proveedor usando llamadas síncronas
+pub fn obtener_modelos_disponibles(
+    provider: &str,
+    api_url: &str,
+    api_key: &str,
+) -> anyhow::Result<Vec<String>> {
+    let client = reqwest::blocking::Client::new();
+    let url = api_url.trim_end_matches('/');
 
-    if !response.status().is_success() {
-        return Err(anyhow::anyhow!(
-            "Error al obtener modelos: {}",
-            response.status()
-        ));
+    match provider {
+        "anthropic" => {
+            let response = client
+                .get(format!("{}/v1/models", url))
+                .header("x-api-key", api_key)
+                .header("anthropic-version", "2023-06-01")
+                .send()?;
+
+            let json: serde_json::Value = response.json()?;
+            let models = json["data"]
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("Respuesta de Claude inválida"))?
+                .iter()
+                .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
+                .collect();
+            Ok(models)
+        }
+        "gemini" => {
+            let response = client
+                .get(format!("{}/v1beta/models?key={}", url, api_key))
+                .send()?;
+
+            let json: serde_json::Value = response.json()?;
+            let models = json["models"]
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("Respuesta de Gemini inválida"))?
+                .iter()
+                .filter_map(|m| {
+                    m["name"]
+                        .as_str()
+                        .map(|s| s.trim_start_matches("models/").to_string())
+                })
+                .collect();
+            Ok(models)
+        }
+        "openai" | "groq" | "ollama" | "kimi" | "deepseek" => {
+            // Para Ollama local nativo, se sugiere usar /api/tags, sino usa OpenAI compat /models
+            let is_ollama_native = provider == "ollama" && !url.ends_with("/v1");
+            let target_url = if is_ollama_native {
+                format!("{}/api/tags", url)
+            } else {
+                format!("{}/models", url)
+            };
+
+            let mut request = client.get(&target_url);
+            if !api_key.is_empty() {
+                request = request.header("authorization", format!("Bearer {}", api_key));
+            }
+
+            let response = request.send()?;
+            let json: serde_json::Value = response.json()?;
+
+            if is_ollama_native {
+                let models = json["models"]
+                    .as_array()
+                    .ok_or_else(|| anyhow::anyhow!("Respuesta de Ollama inválida"))?
+                    .iter()
+                    .filter_map(|m| m["name"].as_str().map(|s| s.to_string()))
+                    .collect();
+                Ok(models)
+            } else {
+                let models = json["data"]
+                    .as_array()
+                    .ok_or_else(|| anyhow::anyhow!("Respuesta API compatible inválida"))?
+                    .iter()
+                    .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
+                    .collect();
+                Ok(models)
+            }
+        }
+        _ => Err(anyhow::anyhow!("Proveedor no soportado")),
     }
-
-    let body: serde_json::Value = response.json()?;
-    let models = body["models"]
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("No se encontraron modelos en la respuesta"))?
-        .iter()
-        .filter_map(|m| m["name"].as_str())
-        .map(|name| name.replace("models/", ""))
-        .filter(|name| name.starts_with("gemini"))
-        .collect();
-
-    Ok(models)
 }

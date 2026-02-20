@@ -22,7 +22,7 @@ cd sentinel-rust
 cargo build --release
 ```
 
-The compiled binary will be located at `target/release/sentinel-rust` (or `sentinel-rust.exe` on Windows).
+The compiled binary will be located at `target/release/sentinel-pro` (or `sentinel-pro.exe` on Windows).
 
 ## Initial Configuration
 
@@ -36,9 +36,10 @@ When you run Sentinel for the first time in a project, an interactive assistant 
 ```
 
 **Supported providers:**
-- **Anthropic Claude**: `https://api.anthropic.com` (default)
+- **Anthropic Claude**: `https://api.anthropic.com`
 - **Google Gemini**: `https://generativelanguage.googleapis.com`
-- Other endpoints compatible with Anthropic format
+- **OpenAI / Groq / Kimi / DeepSeek**: Compatible endpoints
+- **Ollama / LM Studio**: Local AI support (`http://localhost:11434`)
 
 ### 2. Configure fallback model (optional)
 
@@ -105,7 +106,7 @@ mi-proyecto/
 cargo run
 
 # Or using the compiled binary
-./target/release/sentinel-rust
+./target/release/sentinel-pro
 ```
 
 When starting, you will see:

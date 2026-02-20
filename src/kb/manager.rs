@@ -20,13 +20,12 @@ pub struct KBManager {
 
 impl KBManager {
     pub fn new(vector_db: Arc<VectorDB>, config: &SentinelConfig, project_root: &Path) -> Self {
-        // Cargar modelo local si está configurado
-        let local_model = if config.primary_model.provider == "local" {
-            println!("   📥 Inicializando modelo de embeddings local...");
-            match EmbeddingModel::new() {
-                Ok(model) => Some(Arc::new(model)),
+        // Cargar modelo local si el proveedor es 'local' o 'anthropic' (Claude)
+        let local_model = if config.primary_model.provider == "local" || config.primary_model.provider == "anthropic" {
+            match EmbeddingModel::get_or_init() {
+                Ok(model) => Some(model),
                 Err(e) => {
-                    eprintln!("   ❌ Error cargando modelo local: {}", e);
+                    eprintln!("   ❌ Error cargando motor de IA local: {}. Asegúrate de tener conexión a internet para la primera carga o revisa HF_ENDPOINT.", e);
                     None
                 }
             }

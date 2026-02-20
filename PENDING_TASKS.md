@@ -130,6 +130,47 @@ Enfoque: Production Ready.
   - [x] Empaquetado de binarios multi-plataforma.
   - [x] Pipeline de CI/CD.
 
+## Fase 8: Auditoría de Proyecto y Sistema ROI
+Estado: ✅ COMPLETADO (Febrero 2025)
+Enfoque: Escalabilidad de auditoría y medición de valor.
+
+- [x] **8.1 Auditoría Proyecto-Wide**
+  - [x] Comando `pro audit <path>` recursivo.
+  - [x] Integración con `ignore` crate para respetar `.gitignore`.
+  - [x] Panel de selección múltiple para fixes masivos.
+
+- [x] **8.2 Sistema de ROI y Métricas**
+  - [x] Implementación de contabilidad de "Tiempo Ahorrado" en comandos Pro.
+  - [x] Tracking de tokens en fase de inicialización.
+  - [x] Documentación técnica del sistema de métricas (`METRICS_SYSTEM.md`).
+
+- [x] **8.3 Refinamiento de UI/UX**
+  - [x] Spinner flicker-free y auto-limpiable.
+  - [x] Estabilización de consola en carga de modelos pesados.
+
+## Fase 9: Monetización y Subscripciones (SaaS)
+Estado: 📅 PENDIENTE
+Enfoque: Licenciamiento comercial y Trial System.
+
+- [ ] **8.1 Sistema de Licenciamiento Core**
+  - [ ] Implementar validación local criptográfica de licencia.
+  - [ ] Sistema de tracking de "Device ID" para Periodo de Trial (7 días).
+  - [ ] Comandos CLI de licencia (`activate`, `info`).
+
+- [ ] **8.2 Integración Backend / Pasarela de Pagos**
+  - [ ] Configurar Stripe/Lemon Squeezy Webhooks.
+  - [ ] Servidor para creación de Key/License en la nube tras la compra.
+  - [ ] Base de Datos para Control de Usuarios.
+
+- [ ] **8.3 Hardening Anti-Piracy**
+  - [ ] Chequeos de validación periódicos (Grace Period offline).
+  - [ ] Cifrado estático y validación de integridad.
+
+- [ ] **8.4 Experiencia de Usuario (Trial)**
+  - [ ] Intercepción en `init` para crear Trial automático.
+  - [ ] Notificaciones in-CLI sobre días de prueba restantes.
+  - [ ] Bloqueo automático de features Pro post-trial.
+
 ## Documentation Website
 Estado: ✅ COMPLETADO (Febrero 2025)
 Herramienta: Docusaurus

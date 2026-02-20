@@ -23,7 +23,22 @@ pub struct ModelConfig {
     pub url: String,
     pub api_key: String,
     #[serde(default)]
-    pub provider: String, // "anthropic", "gemini", "ollama", "lm-studio"
+    pub provider: String, // "anthropic", "gemini", "ollama", "lm-studio", "local"
+}
+
+impl ModelConfig {
+    pub fn embedding_dimension(&self) -> u64 {
+        match self.provider.as_str() {
+            "local" | "anthropic" => 384, // all-MiniLM-L6-v2 local model
+            "openai" | "lm-studio" => 1536, // typical default for OpenAI embeddings
+            "ollama" => {
+                if self.name.contains("mxbai") { 1024 }
+                else if self.name.contains("all-minilm") { 384 }
+                else { 768 } // fallback for llama2/nomic
+            }
+            _ => 768, // Default (Google Gemini, etc.)
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -164,7 +179,7 @@ impl SentinelConfig {
                 bug_predictor_model: "bug-predictor-v1".to_string(),
             }),
             knowledge_base: Some(KnowledgeBaseConfig {
-                vector_db_url: "http://localhost:6333".to_string(),
+                vector_db_url: "http://localhost:6334".to_string(),
                 index_on_start: true,
             }),
         }
@@ -476,6 +491,57 @@ impl SentinelConfig {
             } else {
                 vec!["{name}.test.{ext}".to_string()] // Patrón genérico
             };
+        }
+
+        // Asegurar que existan secciones de Pro Features (v5.0.0+)
+        if config.features.is_none() {
+            config.features = Some(FeaturesConfig {
+                enable_ml: true,
+                enable_agents: true,
+                enable_knowledge_base: true,
+            });
+        }
+
+        if config.knowledge_base.is_none() {
+            config.knowledge_base = Some(KnowledgeBaseConfig {
+                vector_db_url: "http://localhost:6333".to_string(),
+                index_on_start: true,
+            });
+        }
+
+        // Asegurar que existan secciones de Pro Features (v5.0.0+) con defaults sanos
+        if config.features.is_none() {
+            config.features = Some(FeaturesConfig {
+                enable_ml: true,
+                enable_agents: true,
+                enable_knowledge_base: true,
+            });
+        }
+
+        if config.knowledge_base.is_none() {
+            config.knowledge_base = Some(KnowledgeBaseConfig {
+                vector_db_url: "http://localhost:6333".to_string(), // REST port
+                index_on_start: true,
+            });
+        }
+
+        if config.ml.is_none() {
+            config.ml = Some(MlConfig {
+                models_path: ".sentinel/models".to_string(),
+                embeddings_model: "all-MiniLM-L6-v2".to_string(),
+                bug_predictor_model: "bug-predictor-v1".to_string(),
+            });
+        }
+
+        // Limpieza de URLs: asegurar que tengan esquema
+        if !config.primary_model.url.contains("://") && !config.primary_model.url.is_empty() {
+            config.primary_model.url = format!("http://{}", config.primary_model.url);
+        }
+        
+        if let Some(kb) = &mut config.knowledge_base {
+            if !kb.vector_db_url.contains("://") && !kb.vector_db_url.is_empty() {
+                kb.vector_db_url = format!("http://{}", kb.vector_db_url);
+            }
         }
 
         config

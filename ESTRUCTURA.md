@@ -16,19 +16,31 @@ src/
 │   ├── framework.rs     # Detección de frameworks con IA
 │   ├── analysis.rs      # Análisis de arquitectura
 │   └── utils.rs         # Utilidades (extraer/eliminar código)
+├── agents/        # Sistema Multi-Agente (Etapa 3)
+│   ├── mod.rs           # Definición del módulo y orquestador
+│   ├── base.rs          # Traits y tipos base para agentes
+│   ├── orchestrator.rs  # Gestión de agentes concurrentes
+│   ├── coder.rs         # Agente especializado en código (CoderAgent)
+│   ├── reviewer.rs      # Agente especializado en revisión (ReviewerAgent)
+│   ├── tester.rs        # Agente especializado en tests (TesterAgent)
+│   └── refactor.rs      # Agente especializado en refactor (RefactorAgent)
 ├── kb/            # Módulo de Knowledge Base (Etapa 2)
 │   ├── mod.rs           # Definición del módulo y re-exports
 │   ├── indexer.rs       # Indexación de código con Tree-sitter
 │   ├── vector_db.rs     # Cliente de base de datos vectorial (Qdrant)
 │   ├── context.rs       # Builder de contexto semántico
 │   └── manager.rs       # Orquestador de indexación en background
+├── commands/      # Dispatcher de comandos CLI
+│   ├── mod.rs           # Comandos base (init, monitor)
+│   ├── pro.rs           # Comandos de Sentinel Pro (audit, fix, explain, etc.)
+│   └── monitor.rs       # Lógica persistente de monitoreo
 ├── config.rs      # Gestión de configuración (.sentinelrc.toml)
 ├── docs.rs        # Generación de documentación
 ├── files.rs       # Utilidades de detección de archivos padres
 ├── git.rs         # Operaciones de Git
-├── stats.rs       # Estadísticas y métricas de productividad
-├── tests.rs       # Ejecución y diagn��stico de tests
-└── ui.rs          # Interfaz de usuario y validación de proyectos
+├── stats.rs       # Estadísticas y métricas ROI (Dashboard)
+├── tests.rs       # Ejecución y diagnóstico de tests
+└── ui.rs          # Interfaz de usuario (Spinner, Menús, Prompt)
 ```
 
 ## Descripción de Módulos
@@ -390,41 +402,44 @@ pub struct SentinelConfig {
 ---
 
 ### `stats.rs`
-**Responsabilidad**: Estadísticas y métricas de productividad
-
-**Funciones públicas**:
-- `SentinelStats::cargar(project_path: &Path) -> Self`
-  - Carga estadísticas desde `.sentinel-stats.json`
-  - Crea estadísticas vacías si no existen
-
-- `SentinelStats::guardar(&self, project_path: &Path)`
-  - Guarda las estadísticas actuales en `.sentinel-stats.json`
-
-- `SentinelStats::incrementar_bugs_evitados(&mut self)`
-  - Incrementa contador de bugs críticos evitados
-
-- `SentinelStats::incrementar_sugerencias(&mut self)`
-  - Incrementa contador de sugerencias aplicadas
-
-- `SentinelStats::incrementar_tests_corregidos(&mut self)`
-  - Incrementa contador de tests fallidos corregidos con IA
-
-- `SentinelStats::agregar_tiempo_ahorrado(&mut self, minutos: u32)`
-  - Agrega tiempo estimado ahorrado en minutos
+**Responsabilidad**: Estadísticas y métricas de productividad ROI
 
 **Estructura de datos**:
 ```rust
 pub struct SentinelStats {
+    pub total_analisis: u32,
     pub bugs_criticos_evitados: u32,
     pub sugerencias_aplicadas: u32,
-    pub tests_fallidos_corregidos: u32,
+    pub total_tokens_used: u64,
+    pub total_cost_usd: f64,
     pub tiempo_estimado_ahorrado_mins: u32,
 }
 ```
 
-**Dependencias**:
-- `serde` - Serialización
-- `serde_json` - Formato JSON
+**Métricas Dinámicas (Phase 8)**:
+- **ROI Tracking**: Cada fix aplicado en `pro audit`, `generate`, `refactor` o `fix` incrementa el ahorro de tiempo.
+- **Token Accounting**: Registra tokens de prompt y completion en cada interacción AI.
+- **Costo Estimado**: Cálculo basado en precios promedio de mercado por 1K tokens.
+
+---
+
+### `agents/` (v5.0.0 Pro - Etapa 3)
+**Responsabilidad**: Ejecución de tareas complejas mediante agentes autónomos
+
+- **CoderAgent**: Genera y aplica cambios de código usando RAG.
+- **ReviewerAgent**: Realiza auditorías de seguridad y arquitectura.
+- **TesterAgent**: Diseña y ejecuta planes de prueba.
+- **RefactorAgent**: Mejora la calidad del código sin cambiar comportamiento.
+
+---
+
+### `commands/pro.rs`
+**Responsabilidad**: Lógica de los comandos avanzados de Sentinel Pro
+
+- **`sentinel pro audit <path>`**: Escaneo recursivo del proyecto con UI interactiva para aplicar fixes masivos.
+- **`sentinel pro migrate <src> <dst>`**: Conversión inteligente entre frameworks.
+- **`sentinel pro workflow <name>`**: Orquestación multi-agente para flujos de trabajo secuenciales.
+- **`sentinel pro explain/optimize`**: Comandos didácticos y de rendimiento.
 
 ---
 

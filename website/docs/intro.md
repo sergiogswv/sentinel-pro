@@ -2,46 +2,41 @@
 sidebar_position: 1
 ---
 
-# Tutorial Intro
+# 🛡️ Introducción a Sentinel Pro
 
-Let's discover **Docusaurus in less than 5 minutes**.
+Bienvenido a la documentación oficial de **Sentinel Pro**, la suite definitiva de desarrollo asistido por IA, diseñada específicamente para entornos de alto rendimiento y arquitecturas robustas.
 
-## Getting Started
+## ¿Qué es Sentinel Pro?
 
-Get started by **creating a new site**.
+Sentinel no es solo un linter o un monitor de archivos; es un **ecosistema de agentes inteligentes** que viven en tu terminal y entienden profundamente tu codebase. A diferencia de otras herramientas, Sentinel Pro utiliza Machine Learning local y búsqueda semántica para proporcionar contexto relevante en cada sugerencia.
 
-Or **try Docusaurus immediately** with **[docusaurus.new](https://docusaurus.new)**.
+### Capacidades Core
 
-### What you'll need
+- 🔎 **Auditoría Inteligente:** Escaneo recursivo de proyectos para detectar deuda técnica y vulnerabilidades.
+- 👥 **Sistema Multi-Agente:** Orquestación de agentes especializados (Coder, Reviewer, Tester) para tareas complejas.
+- 🧠 **Base de Conocimientos Local:** Una base de datos vectorial (Qdrant) que indexa tu código para una recuperación de contexto precisa.
+- 📊 **Métricas de ROI:** Seguimiento en tiempo real del tiempo ahorrado, tokens consumidos y costos de API.
+- 🔄 **Workflows Automatizados:** Flujos de trabajo multi-paso como `fix-and-verify` que corrigen, refactorizan y prueban el código automáticamente.
 
-- [Node.js](https://nodejs.org/en/download/) version 20.0 or above:
-  - When installing Node.js, you are recommended to check all checkboxes related to dependencies.
+## Comandos Principales
 
-## Generate a new site
-
-Generate a new Docusaurus site using the **classic template**.
-
-The classic template will automatically be added to your project after you run the command:
-
-```bash
-npm init docusaurus@latest my-website classic
-```
-
-You can type this command into Command Prompt, Powershell, Terminal, or any other integrated terminal of your code editor.
-
-The command also installs all necessary dependencies you need to run Docusaurus.
-
-## Start your site
-
-Run the development server:
+Para empezar a utilizar la potencia de la Fase 8, puedes probar:
 
 ```bash
-cd my-website
-npm run start
+# Audita todo tu directorio de fuentes
+sentinel pro audit src/
+
+# Consulta el ahorro acumulado y costo de IA
+sentinel m
+
+# Chatea con tu proyecto usando contexto semántico
+sentinel pro chat
 ```
 
-The `cd` command changes the directory you're working with. In order to work with your newly created Docusaurus site, you'll need to navigate the terminal there.
+## Próximos Pasos
 
-The `npm run start` command builds your website locally and serves it through a development server, ready for you to view at http://localhost:3000/.
+Explora las guías detalladas para sacar el máximo provecho a tu Sentinel:
 
-Open `docs/intro.md` (this page) and edit some lines: the site **reloads automatically** and displays your changes.
+- [Configuración Avanzada](/docs/tutorial-basics/create-a-document)
+- [Gestión de Agentes](/docs/tutorial-basics/markdown-features)
+- [Sistema de Métricas](/docs/tutorial-basics/congratulations)

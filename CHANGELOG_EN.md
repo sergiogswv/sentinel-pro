@@ -4,7 +4,76 @@ All notable changes to Sentinel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-## [5.0.0-pro.alpha.2] - 2025-02-17
+
+## [5.0.0-pro.beta.2] - 2026-02-19
+
+### 🔎 Project Audit & ROI System (Stage 8)
+
+#### Interactive Auditing
+- **Recursive Audit**: New command `sentinel pro audit <path>` that recursively scans directories respecting `.gitignore`.
+- **Selective Batch Fixing**: Consolidated issue list with `MultiSelect` UI, allowing users to apply multiple fixes across different files in a single pass.
+- **Auto-Backups**: Automatic `.audit_bak` creation before applying any destructive fix.
+
+#### ROI & Analytics System
+- **Productivity Tracking**: All Pro commands (`audit`, `fix`, `refactor`, `migrate`) now contribute to the "Time Saved" metric.
+- **ROI Documentation**: New `METRICS_SYSTEM.md` file explaining how ROI, Token costs, and savings are calculated.
+- **Initialization Tracking**: Tokens used during automatic framework detection at startup are now recorded in the project stats.
+
+#### UI & DX Polish
+- **Flicker-Free Spinners**: Refactored the internal progress system to use a centralized draw target, eliminating terminal flickering.
+- **Smart Loading Feedback**: Enhanced local model loading messages with discrete, Magenta spinners that auto-clean upon completion.
+- **Bug Fixes**: Resolved multiple compilation errors related to missing imports in the UI module.
+
+## [5.0.0-pro.beta.1] - 2026-02-19
+
+### 🚀 Quality, Testing & Release (Stage 7)
+
+#### Hardening & Security
+- **Path Traversal Prevention**: New `is_safe_path` and `secure_join` utilities to prevent AI from writing outside the project path during iterative workflows.
+- **Test Sandboxing**: Automated Jest execution via `TesterAgent` now clears environment variables (`.env_clear()`), allowing only `PATH`, `NODE_ENV`, `USER`, and `HOME`. Prevents secret leakage in test environments.
+- **Warning Cleanup**: Removed dead code and unused imports.
+
+#### Release & CI/CD
+- **Multi-platform Pipeline**: Official GitHub Actions workflow for Ubuntu, Windows, and macOS (AMD64 & ARM64).
+- **Auto Releases**: Integration with GitHub releases for native binaries on every `v*` tag.
+
+#### Documentation (website)
+- **Docusaurus Site**: Official setup for the `website` documentation portal.
+- New detailed interactive guide for custom Workflow configuration.
+
+## [5.0.0-pro.alpha.4] - 2026-02-19
+
+### 🔮 Advanced Workflows & Integration (Stage 6)
+
+#### Workflow Engine
+- **Multi-Step Flow Engine**: New system to chain agents (`WorkflowEngine`).
+- **Predefined Workflows**:
+  - `fix-and-verify`: CoderAgent (Fix) -> RefactorAgent (Clean) -> TesterAgent (Test).
+  - `review-security`: ReviewerAgent (Audit) -> CoderAgent (Mitigate).
+- **Pro Command**: `sentinel pro workflow <name> [file]`.
+
+#### Framework Migration
+- **Smart Migration**: New `sentinel pro migrate <src> <dst>` command to convert code between frameworks (eg: Express -> NestJS).
+- **Dependency Aware**: `CoderAgent` now detects project dependencies (`package.json`) to avoid hallucinations.
+
+#### High-Level Operations
+- **Full Project Review**: `sentinel pro review` performs a complete project-wide architectural audit.
+- **Explain & Optimize**: New educational and performance commands (`explain`, `optimize`).
+
+## [5.0.0-pro.alpha.3] - 2026-02-18
+
+### 👥 Multi-Agent System (Stage 3)
+
+#### Agent Architecture
+- **Agent Trait**: Common interface definition for autonomous agents.
+- **Agent Orchestrator**: Concurrent management and execution system for agents.
+- **CoderAgent**: Specialized agent for code generation and refactoring with structured prompts.
+- **ReviewerAgent**: Specialized agent for Code Review, security auditing, and Clean Code.
+
+#### CLI Integration
+- **`sentinel pro generate`**: Now uses `CoderAgent` for smart implementation generation.
+- **`sentinel pro analyze`**: Connected to `ReviewerAgent` for architecture and security reports.
+- **`sentinel pro refactor`**: Automated via `CoderAgent` with specific improvement instructions.
 
 ### 🧠 Knowledge Base & Vector Store (Stage 2)
 

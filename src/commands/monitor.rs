@@ -40,7 +40,7 @@ pub fn start_monitor() {
     if let Some(features) = &config.features {
         if features.enable_knowledge_base {
             if let Some(kb_config) = &config.knowledge_base {
-                if let Ok(db) = kb::VectorDB::new(&kb_config.vector_db_url) {
+                if let Ok(db) = kb::VectorDB::new(&kb_config.vector_db_url, config.primary_model.embedding_dimension()) {
                     let db = Arc::new(db);
                     let manager =
                         Arc::new(kb::KBManager::new(Arc::clone(&db), &config, &project_path));
@@ -54,8 +54,8 @@ pub fn start_monitor() {
                     thread::spawn(move || {
                         let rt = tokio::runtime::Runtime::new().unwrap();
                         rt.block_on(async {
-                            if let Err(e) = db.initialize_collection().await {
-                                println!("   ⚠️  KB: Error al conectar con Qdrant: {}", e);
+                            if let Err(_) = db.initialize_collection().await {
+                                println!("   ℹ️  KB: {} (Qdrant no detectado en localhost:6334)", "Modo Offline".yellow());
                                 return;
                             }
 
@@ -147,6 +147,19 @@ pub fn start_monitor() {
                         }
                     } else {
                         println!("   ⏭️  Limpieza de caché cancelada.");
+                    }
+                } else if cmd == "a" {
+                    print!("🔍 Ingrese la ruta a auditar (ej. src/, .): ");
+                    io::stdout().flush().unwrap();
+                    let mut input_path = String::new();
+                    if io::stdin().read_line(&mut input_path).is_ok() {
+                        let path = input_path.trim();
+                        let final_path = if path.is_empty() { "." } else { path };
+                        println!("🚀 Lanzando auditoría interactiva en: {}", final_path);
+                        crate::commands::pro::handle_pro_command(crate::commands::ProCommands::Audit { 
+                            target: final_path.to_string() 
+                        });
+                        println!("✅ Auditoría terminada. Volviendo a monitorear...\n");
                     }
                 } else if cmd == "h" || cmd == "help" {
                     ui::mostrar_ayuda(Some(&config_hilo));

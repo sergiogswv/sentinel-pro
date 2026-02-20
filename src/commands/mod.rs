@@ -79,11 +79,21 @@ pub enum ProCommands {
         /// Archivo objetivo (opcional)
         file: Option<String>,
     },
+    /// Auditoría interactiva con correcciones automáticas
+    Audit {
+        /// Archivo o carpeta a auditar
+        target: String,
+    },
     /// Gestión de modelos de ML Local
     Ml {
         #[command(subcommand)]
         subcommand: MlCommands,
     },
+    /// Limpia la caché de IA para un archivo, directorio o todo el proyecto
+    CleanCache {
+        /// Archivo, directorio a limpiar (opcional, por defecto todo el proyecto)
+        target: Option<String>,
+    }
 }
 
 #[derive(Subcommand)]

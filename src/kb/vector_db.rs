@@ -10,14 +10,21 @@ use std::sync::Arc;
 pub struct VectorDB {
     client: Arc<Qdrant>,
     collection_name: String,
+    dimension: u64,
 }
 
 impl VectorDB {
-    pub fn new(url: &str) -> anyhow::Result<Self> {
-        let client = Qdrant::from_url(url).build()?;
+    pub fn new(url: &str, dimension: u64) -> anyhow::Result<Self> {
+        if url.is_empty() || !url.contains("://") {
+             return Err(anyhow::anyhow!("URL de Qdrant inválida o vacía: '{}'. Debe incluir el esquema (ej: http://)", url));
+        }
+        let mut config = Qdrant::from_url(url);
+        config.check_compatibility = false;
+        let client = Qdrant::new(config)?;
         Ok(Self {
             client: Arc::new(client),
-            collection_name: "sentinel_code".to_string(),
+            collection_name: format!("sentinel_code_{}", dimension),
+            dimension,
         })
     }
 
@@ -26,7 +33,7 @@ impl VectorDB {
             self.client
                 .create_collection(
                     CreateCollectionBuilder::new(self.collection_name.clone())
-                        .vectors_config(VectorParamsBuilder::new(768, Distance::Cosine)),
+                        .vectors_config(VectorParamsBuilder::new(self.dimension, Distance::Cosine)),
                 )
                 .await?;
             println!(

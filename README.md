@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.0.0--pro.beta.1-purple.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-5.0.0--pro.beta.2-purple.svg" alt="Version">
   <img src="https://img.shields.io/badge/rust-2024-orange.svg" alt="Rust">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
 </p>
@@ -32,6 +32,7 @@ Real-time monitoring tool written in **Rust** that analyzes code changes using *
 - 🧪 **Autonomous Testing** - AI-assisted test generation and execution
 - 🔄 **Advanced Workflows** - Multi-step automation (Fix & Verify, Review & Mitigate)
 - 🚀 **Framework Migration** - Intelligent code translation between frameworks
+- 🔎 **Interactive Project Audit** - Recursive auditing with selective batch fixing (New!)
 - 🎯 **Parent File Detection** - Automatically finds parent modules
 - 📚 **Auto-documentation** - Generates technical manuals automatically
 - 🔒 **Security Pro** - Local LLM support for 100% offline privacy
@@ -95,6 +96,7 @@ sentinel pro workflow <name>  # Execute multi-step workflows (e.g., fix-and-veri
 sentinel pro migrate <s, d>   # Migrate code between frameworks (Pro)
 sentinel pro review           # Full project terminology & architectural audit
 sentinel pro explain <file>   # Didactic code explanation
+sentinel pro audit <path>     # Recursive project audit & interactive fixes (New!)
 sentinel pro optimize <file>  # Performance optimization suggestions
 sentinel pro docs <dir>       # Generates comprehensive Markdown documentation for a directory
 ```
@@ -208,7 +210,8 @@ Phase 4: ✅ Completed - Multi-model AI & Parent file detection (v4.5.0)
 Phase 5: ✅ Completed - CLI Dispatcher, Local LLMs & Rules Engine (v5.0.0-pro)
 Phase 6: ✅ Completed - Local Knowledge Base & Vector Search (v5.0.0-pro.alpha.4)
 Phase 7: ✅ Completed - AI Multi-Agent System (Architect, QA, Dev) (v5.0.0-pro.beta.1)
-Phase 8: 📅 Planned - SecOps & Automated Code Reviews
+Phase 8: ✅ Completed - Project Audit & ROI System (v5.0.0-pro.beta.2)
+Phase 9: 📅 Planned - Monetization & Licensing (SaaS)
 ```
 
 [View complete roadmap →](docs/roadmap.md)
@@ -226,10 +229,6 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 **Sergio Guadarrama**
 
 ---
-
-<p align="center">
-  Made with ❤️ using Rust and Claude AI
-</p>
 
 <p align="center">
   <a href="docs/installation.md">Installation</a> •

@@ -10,8 +10,20 @@ use crate::kb::{ContextBuilder, VectorDB};
 use crate::stats::SentinelStats;
 use crate::ui;
 use colored::*;
+use dialoguer::{theme::ColorfulTheme, MultiSelect};
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::sync::{Arc, Mutex};
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+struct AuditIssue {
+    title: String,
+    description: String,
+    severity: String,
+    suggested_fix: String,
+    #[serde(default)]
+    file_path: String,
+}
 
 
 pub fn handle_pro_command(subcommand: ProCommands) {
@@ -24,7 +36,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
     // Inicializar KB Context Builder
     let context_builder = if let Some(kb_config) = &config.knowledge_base {
-        match VectorDB::new(&kb_config.vector_db_url) {
+        match VectorDB::new(&kb_config.vector_db_url, config.primary_model.embedding_dimension()) {
             Ok(db) => {
                 // Usamos el modelo primario para embeddings por defecto
                 // Idealmente deberíamos tener una configuración específica para embeddings
@@ -119,7 +131,15 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     // Si hay artifacts, guardarlos en el archivo
                     if let Some(code) = res.artifacts.first() {
                          match std::fs::write(&file, code) {
-                            Ok(_) => println!("   💾 Archivo guardado: {}", file.cyan()),
+                            Ok(_) => {
+                                println!("   💾 Archivo guardado: {}", file.cyan());
+                                // Update Stats
+                                let mut s = agent_context.stats.lock().unwrap();
+                                s.total_analisis += 1;
+                                s.sugerencias_aplicadas += 1;
+                                s.tiempo_estimado_ahorrado_mins += 10;
+                                s.guardar(&agent_context.project_root);
+                            },
                             Err(e) => println!("   ⚠️  No se pudo guardar el archivo: {}", e),
                          }
                     }
@@ -175,7 +195,15 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
                     if let Some(code) = res.artifacts.first() {
                          match std::fs::write(&file, code) {
-                            Ok(_) => println!("   💾 Cambios aplicados a: {}", file.cyan()),
+                            Ok(_) => {
+                                println!("   💾 Cambios aplicados a: {}", file.cyan());
+                                // Update Stats
+                                let mut s = agent_context.stats.lock().unwrap();
+                                s.total_analisis += 1;
+                                s.sugerencias_aplicadas += 1;
+                                s.tiempo_estimado_ahorrado_mins += 15;
+                                s.guardar(&agent_context.project_root);
+                            },
                             Err(e) => println!("   ⚠️  No se pudo escribir el archivo: {}", e),
                          }
                     } else {
@@ -224,7 +252,16 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     println!("{}", "🩹 BUGS CORREGIDOS".bold().green());
                      if let Some(code) = res.artifacts.first() {
                          match std::fs::write(&file, code) {
-                            Ok(_) => println!("   💾 Correcciones aplicadas a: {}", file.cyan()),
+                            Ok(_) => {
+                                println!("   💾 Correcciones aplicadas a: {}", file.cyan());
+                                // Update Stats
+                                let mut s = agent_context.stats.lock().unwrap();
+                                s.total_analisis += 1;
+                                s.sugerencias_aplicadas += 1;
+                                s.bugs_criticos_evitados += 1;
+                                s.tiempo_estimado_ahorrado_mins += 20;
+                                s.guardar(&agent_context.project_root);
+                            },
                             Err(e) => println!("   ⚠️  No se pudo escribir el archivo: {}", e),
                          }
                     }
@@ -460,10 +497,6 @@ pub fn handle_pro_command(subcommand: ProCommands) {
         }
         ProCommands::Ml { subcommand } => match subcommand {
             crate::commands::MlCommands::Download => {
-                println!(
-                    "{}",
-                    "📥 Descargando modelo de embeddings local (all-MiniLM-L6-v2)...".cyan()
-                );
                 let start = std::time::Instant::now();
                 match crate::ml::embeddings::EmbeddingModel::new() {
                     Ok(_) => {
@@ -490,6 +523,20 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                         Err(e) => println!("{} {}", "❌ Error al generar embedding:".red(), e),
                     },
                     Err(e) => println!("{} {}", "❌ Error al cargar modelo:".red(), e),
+                }
+            }
+        },
+        ProCommands::CleanCache { target } => {
+            let path_str = target.unwrap_or_else(|| ".".to_string());
+            let target_path = std::path::PathBuf::from(&path_str);
+            
+            println!("🧹 {} en: {}...", "Limpiando caché de Sentinel AI".cyan(), path_str.bold());
+            match crate::ai::limpiar_cache(&target_path) {
+                Ok(_) => {
+                    println!("   ✅ Caché limpiada correctamente.");
+                },
+                Err(e) => {
+                    println!("   ❌ Error al limpiar caché: {}", e);
                 }
             }
         },
@@ -652,6 +699,12 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                                   println!("❌ Error al guardar: {}", e);
                              } else {
                                   println!("✅ Archivo guardado: {}", nuevo_nombre.green());
+                                  // Update Stats
+                                  let mut s = agent_context.stats.lock().unwrap();
+                                  s.total_analisis += 1;
+                                  s.sugerencias_aplicadas += 1;
+                                  s.tiempo_estimado_ahorrado_mins += 60;
+                                  s.guardar(&agent_context.project_root);
                              }
                          }
                     } else {
@@ -802,6 +855,166 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     println!("{} {}", "❌ Error al optimizar:", e);
                 }
             }
+        }
+        ProCommands::Audit { target } => {
+            let path = std::path::PathBuf::from(&target);
+            if !path.exists() {
+                println!("{} El destino '{}' no existe.", "❌".red(), target);
+                return;
+            }
+
+            let mut files_to_audit = Vec::new();
+            if path.is_file() {
+                files_to_audit.push(path.clone());
+            } else {
+                let walker = ignore::WalkBuilder::new(&path)
+                    .hidden(false)
+                    .git_ignore(true)
+                    .build();
+                for result in walker {
+                    if let Ok(entry) = result {
+                        let p = entry.path();
+                        if p.is_file() {
+                            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                            if agent_context.config.file_extensions.contains(&ext.to_string()) {
+                                files_to_audit.push(p.to_path_buf());
+                            }
+                        }
+                    }
+                }
+            }
+
+            if files_to_audit.is_empty() {
+                println!("{} No se encontraron archivos cargables para auditar en '{}'.", "⚠️".yellow(), target);
+                return;
+            }
+
+            println!("🔍 Inciando Auditoría en {} archivos...", files_to_audit.len().to_string().cyan());
+            let mut all_issues = Vec::new();
+
+            for (i, file_path) in files_to_audit.iter().enumerate() {
+                let rel_path = file_path.strip_prefix(&agent_context.project_root).unwrap_or(file_path);
+                let pb = ui::crear_progreso(&format!("[{}/{}] Auditando {}...", i + 1, files_to_audit.len(), rel_path.display()));
+
+                let content = std::fs::read_to_string(file_path).unwrap_or_default();
+                let audit_prompt = format!(
+                    "Realiza una auditoría técnica del archivo '{}'.\n\
+                    OBJETIVO: Identificar problemas de calidad, seguridad o bugs que sean CORREGIBLES.\n\
+                    REGLAS:\n\
+                    1. Genera un array JSON con los problemas.\n\
+                    2. Cada objeto DEBE tener: title, description, severity (High/Medium/Low), suggested_fix.\n\
+                    3. Responde SOLO con el JSON.\n\n\
+                    CONTENIDO:\n{}",
+                    rel_path.display(), content
+                );
+
+                let task = Task {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    description: format!("Auditando {}", rel_path.display()),
+                    task_type: TaskType::Analyze,
+                    file_path: Some(file_path.clone()),
+                    context: Some(audit_prompt),
+                };
+
+                if let Ok(res) = rt.block_on(orchestrator.execute_task("ReviewerAgent", &task, &agent_context)) {
+                    let json_str = crate::ai::utils::extraer_json(&res.output);
+                    if let Ok(mut issues) = serde_json::from_str::<Vec<AuditIssue>>(&json_str) {
+                        for issue in &mut issues {
+                            issue.file_path = file_path.to_string_lossy().to_string();
+                            all_issues.push(issue.clone());
+                        }
+                    }
+                }
+                pb.finish_and_clear();
+            }
+
+            if all_issues.is_empty() {
+                println!("{} No se detectaron problemas corregibles.", "✅".green());
+                return;
+            }
+
+            println!("\n📑 Resumen de Auditoría ({} issues detectados):", all_issues.len().to_string().bold().yellow());
+            
+            let options: Vec<String> = all_issues.iter()
+                .map(|i| {
+                    let rel_file = std::path::Path::new(&i.file_path)
+                        .strip_prefix(&agent_context.project_root)
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| i.file_path.clone());
+
+                    let raw_str = format!("[{}] {} - {} ({})", i.severity.to_uppercase(), i.title, i.description, rel_file);
+                    
+                    // Truncar la línea completa agresivamente para evitar line-wraps que rompen dialoguer
+                    let max_len = 90;
+                    if raw_str.chars().count() > max_len {
+                        format!("{}...", raw_str.chars().take(max_len - 3).collect::<String>())
+                    } else {
+                        raw_str
+                    }
+                })
+                .collect();
+
+            let selected = MultiSelect::with_theme(&ColorfulTheme::default())
+                .with_prompt("Selecciona los fixes que deseas aplicar (espacio=seleccionar, enter=confirmar):")
+                .max_length(10)
+                .items(&options)
+                .interact()
+                .unwrap_or_default();
+
+            if selected.is_empty() {
+                println!("   ⏭️  Operación cancelada.");
+                return;
+            }
+
+            println!("\n🚀 Aplicando {} correcciones...", selected.len());
+
+            for &idx in &selected {
+                let issue = &all_issues[idx];
+                let file_path = std::path::Path::new(&issue.file_path);
+                let rel_file = file_path.strip_prefix(&agent_context.project_root).unwrap_or(file_path);
+
+                println!("\n🛠️  Fixing '{}' in {}...", issue.title.bold(), rel_file.display().to_string().cyan());
+
+                // Backup
+                let backup_path = format!("{}.audit_bak", issue.file_path);
+                let _ = std::fs::copy(file_path, &backup_path);
+
+                let content = std::fs::read_to_string(file_path).unwrap_or_default();
+                let fix_task = Task {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    description: format!(
+                        "Aplica este fix específico: {}.\nPROBLEMA: {}\nSOLUCIÓN SUGERIDA: {}\nDevuelve el código COMPLETO actualizado.",
+                        issue.title, issue.description, issue.suggested_fix
+                    ),
+                    task_type: TaskType::Fix,
+                    file_path: Some(file_path.to_path_buf()),
+                    context: Some(content),
+                };
+
+                let pb = ui::crear_progreso("   🤖 Generando parche...");
+                let result = rt.block_on(orchestrator.execute_task("CoderAgent", &fix_task, &agent_context));
+                pb.finish_and_clear();
+
+                if let Ok(res) = result {
+                    if let Some(code) = res.artifacts.first() {
+                        if !code.trim().is_empty() {
+                            if let Err(e) = std::fs::write(file_path, code) {
+                                println!("   ❌ Error escribiendo: {}", e);
+                            } else {
+                                println!("   ✅ Corregido.");
+                                // Update Stats
+                                let mut s = agent_context.stats.lock().unwrap();
+                                s.total_analisis += 1;
+                                s.sugerencias_aplicadas += 1;
+                                s.tiempo_estimado_ahorrado_mins += 20;
+                                s.guardar(&agent_context.project_root);
+                            }
+                        }
+                    }
+                }
+            }
+
+            println!("\n✨ Proceso de auditoría y corrección finalizado.");
         }
     }
 }

@@ -105,6 +105,30 @@ pub fn extraer_codigo(texto: &str) -> String {
     texto.to_string()
 }
 
+/// Extrae un bloque JSON de una respuesta de IA.
+pub fn extraer_json(texto: &str) -> String {
+    if let Some(start) = texto.find("```json") {
+        let resto = &texto[start + 7..];
+        if let Some(end) = resto.find("```") {
+            return resto[..end].trim().to_string();
+        }
+    }
+
+    if let Some(start) = texto.find('{') {
+        if let Some(end) = texto.rfind('}') {
+            return texto[start..=end].trim().to_string();
+        }
+    }
+
+    if let Some(start) = texto.find('[') {
+        if let Some(end) = texto.rfind(']') {
+            return texto[start..=end].trim().to_string();
+        }
+    }
+
+    texto.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

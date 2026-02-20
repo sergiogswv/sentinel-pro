@@ -6,19 +6,31 @@ use qdrant_client::qdrant::value::Kind;
 pub struct ContextBuilder {
     vector_db: VectorDB,
     embedding_model: ModelConfig,
+    local_model: Option<std::sync::Arc<crate::ml::embeddings::EmbeddingModel>>,
 }
 
 impl ContextBuilder {
     pub fn new(vector_db: VectorDB, embedding_model: ModelConfig) -> Self {
+        let local_model = if embedding_model.provider == "local" || embedding_model.provider == "anthropic" {
+            crate::ml::embeddings::EmbeddingModel::get_or_init().ok()
+        } else {
+            None
+        };
+
         Self {
             vector_db,
             embedding_model,
+            local_model,
         }
     }
 
     pub async fn build_context(&self, query: &str, limit: u64, rerank: bool) -> anyhow::Result<String> {
         // 1. Obtener embedding de la consulta
-        let embedding = obtener_embeddings(vec![query.to_string()], &self.embedding_model)?;
+        let embedding = if let Some(local) = &self.local_model {
+            local.embed(&vec![query.to_string()])?
+        } else {
+            obtener_embeddings(vec![query.to_string()], &self.embedding_model)?
+        };
         let query_vector = embedding[0].clone();
 
         // 2. Buscar en VectorDB (pedimos un poco más para re-ranking)

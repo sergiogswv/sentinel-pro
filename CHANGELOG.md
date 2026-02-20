@@ -4,6 +4,27 @@ All notable changes to Sentinel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [5.0.0-pro.beta.2] - 2026-02-19
+
+### 🔎 Project Audit & ROI System (Fase 8)
+
+#### Interactive Auditing
+- **Recursive Audit**: New command `sentinel pro audit <path>` that recursively scans directories respecting `.gitignore`.
+- **Selective Batch Fixing**: Consolidated issue list with `MultiSelect` UI, allowing users to apply multiple fixes across different files in a single pass.
+- **Auto-Backups**: Automatic `.audit_bak` creation before applying any destructive fix.
+
+#### ROI & Analytics System
+- **Productivity Tracking**: All Pro commands (`audit`, `fix`, `refactor`, `migrate`) now contribute to the "Time Saved" metric.
+- **ROI Documentation**: New `METRICS_SYSTEM.md` file explaining how ROI, Token costs, and savings are calculated.
+- **Initialization Tracking**: Tokens used during automatic framework detection at startup are now recorded in the project stats.
+
+#### UI & DX Polish
+- **Flicker-Free Spinners**: Refactored the internal progress system to use a centralized draw target, eliminating terminal flickering.
+- **Smart Loading Feedback**: Enhanced local model loading messages with discrete, Magenta spinners that auto-clean upon completion.
+- **Bug Fixes**: Resolved multiple compilation errors related to missing imports in the UI module.
+
+
 ## [5.0.0-pro.beta.1] - 2026-02-19
 
 ### 🚀 Calidad, Testing y Lanzamiento (Fase 7)

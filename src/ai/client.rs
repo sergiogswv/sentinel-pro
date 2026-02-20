@@ -356,22 +356,27 @@ pub fn obtener_embeddings(
     textos: Vec<String>,
     model: &ModelConfig,
 ) -> anyhow::Result<Vec<Vec<f32>>> {
-    let client = Client::new();
+    if !model.url.contains("://") && !model.url.is_empty() && model.provider != "local" {
+         return Err(anyhow::anyhow!("URL del modelo inválida (falta esquema): {}", model.url));
+    }
 
     match model.provider.as_str() {
         "gemini" => {
+            let client = Client::new();
             obtener_embeddings_gemini(&client, textos, &model.api_key, &model.url, &model.name)
         }
-        "ollama" => obtener_embeddings_ollama(&client, textos, &model.url, &model.name),
+        "ollama" => {
+            let client = Client::new();
+            obtener_embeddings_ollama(&client, textos, &model.url, &model.name)
+        }
         "openai" | "lm-studio" => {
+            let client = Client::new();
             obtener_embeddings_openai(&client, textos, &model.api_key, &model.url, &model.name)
         }
-        "local" => {
-            // Nota: Esto carga el modelo cada vez. Para indexación masiva deberíamos
-            // instanciar EmbeddingModel una vez y reutilizarlo en capas superiores.
-            // Por ahora, funciona para consultas esporádicas.
-            let embedding_model = crate::ml::embeddings::EmbeddingModel::new()?;
-            embedding_model.embed(&textos)
+        "local" | "anthropic" => {
+            // Usar el singleton centralizado en ml::embeddings
+            let model_arc = crate::ml::embeddings::EmbeddingModel::get_or_init()?;
+            model_arc.embed(&textos)
         }
         _ => Err(anyhow::anyhow!(
             "El proveedor {} no soporta embeddings actualmente",
