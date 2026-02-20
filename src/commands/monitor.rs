@@ -20,6 +20,9 @@ pub fn start_monitor() {
         std::process::exit(1);
     }
 
+    // Guardar como proyecto activo
+    let _ = SentinelConfig::save_active_project(&project_path);
+
     let config = Arc::new(ui::inicializar_sentinel(&project_path));
     let stats = Arc::new(Mutex::new(SentinelStats::cargar(&project_path)));
 
@@ -36,46 +39,10 @@ pub fn start_monitor() {
     let rule_engine = Arc::new(rule_engine);
 
     // --- Knowledge Base (v5.0.0 Pro) ---
-    let mut kb_tx_opt = None;
-    if let Some(features) = &config.features {
-        if features.enable_knowledge_base {
-            if let Some(kb_config) = &config.knowledge_base {
-                if let Ok(db) = kb::VectorDB::new(&kb_config.vector_db_url, config.primary_model.embedding_dimension()) {
-                    let db = Arc::new(db);
-                    let manager =
-                        Arc::new(kb::KBManager::new(Arc::clone(&db), &config, &project_path));
-
-                    let (tx_kb, rx_kb) = tokio::sync::mpsc::channel(100);
-                    kb_tx_opt = Some(tx_kb);
-
-                    let manager_init = Arc::clone(&manager);
-                    let kb_config_init = kb_config.clone();
-
-                    thread::spawn(move || {
-                        let rt = tokio::runtime::Runtime::new().unwrap();
-                        rt.block_on(async {
-                            if let Err(_) = db.initialize_collection().await {
-                                println!("   ℹ️  KB: {} (Qdrant no detectado en localhost:6334)", "Modo Offline".yellow());
-                                return;
-                            }
-
-                            if kb_config_init.index_on_start {
-                                println!("   🧠 KB: Iniciando indexación del codebase...");
-                                if let Err(e) = manager_init.initial_index().await {
-                                    println!("   ⚠️  KB: Error en indexación inicial: {}", e);
-                                } else {
-                                    println!("   ✅ KB: Indexación inicial completada.");
-                                }
-                            }
-
-                            manager_init.start_background_task(rx_kb).await;
-                        });
-                    });
-                }
-            }
-        }
-    }
-    let kb_tx = kb_tx_opt;
+    let kb_tx = Arc::new(Mutex::new(iniciar_kb_recurso(
+        Arc::clone(&config),
+        project_path.clone(),
+    )));
 
     let esta_pausado = Arc::new(Mutex::new(false));
     let pausa_loop = Arc::clone(&esta_pausado);
@@ -90,6 +57,7 @@ pub fn start_monitor() {
     let stats_hilo = Arc::clone(&stats);
     let pausa_hilo = Arc::clone(&esta_pausado);
     let esperando_input_hilo = Arc::clone(&esperando_input);
+    let kb_tx_hilo = Arc::clone(&kb_tx);
 
     thread::spawn(move || {
         loop {
@@ -156,10 +124,24 @@ pub fn start_monitor() {
                         let path = input_path.trim();
                         let final_path = if path.is_empty() { "." } else { path };
                         println!("🚀 Lanzando auditoría interactiva en: {}", final_path);
-                        crate::commands::pro::handle_pro_command(crate::commands::ProCommands::Audit { 
-                            target: final_path.to_string() 
-                        });
+                        crate::commands::pro::handle_pro_command(
+                            crate::commands::ProCommands::Audit {
+                                target: final_path.to_string(),
+                            },
+                        );
                         println!("✅ Auditoría terminada. Volviendo a monitorear...\n");
+                    }
+                } else if cmd == "k" {
+                    // Re-intentar conexión
+                    crate::commands::pro::handle_pro_command(crate::commands::ProCommands::Kb {
+                        subcommand: crate::commands::KbCommands::Retry,
+                    });
+
+                    // Si funcionó (el archivo se actualizó), recargar config y reiniciar KB
+                    if let Some(new_config) = SentinelConfig::load(&project_path_hilo) {
+                        let mut kb_tx_lock = kb_tx_hilo.lock().unwrap();
+                        *kb_tx_lock =
+                            iniciar_kb_recurso(Arc::new(new_config), project_path_hilo.clone());
                     }
                 } else if cmd == "h" || cmd == "help" {
                     ui::mostrar_ayuda(Some(&config_hilo));
@@ -243,7 +225,7 @@ pub fn start_monitor() {
             .to_string();
 
         // --- Actualizar Knowledge Base (Incremental) ---
-        if let Some(ref tx_kb) = kb_tx {
+        if let Some(tx_kb) = kb_tx.lock().unwrap().as_ref() {
             let _ = tx_kb.try_send(kb::KBUpdate {
                 file_path: changed_path.to_string_lossy().to_string(),
             });
@@ -294,7 +276,8 @@ pub fn start_monitor() {
                             }
                         }
 
-                        let spinner_ai = ui::crear_progreso("   🤖 Analizando arquitectura con IA...");
+                        let spinner_ai =
+                            ui::crear_progreso("   🤖 Analizando arquitectura con IA...");
                         let resultado_analisis = ai::analizar_arquitectura(
                             &codigo,
                             &file_name,
@@ -406,4 +389,68 @@ pub fn start_monitor() {
             }
         }
     }
+}
+
+/// Inicializa la Knowledge Base en segundo plano
+fn iniciar_kb_recurso(
+    config: Arc<SentinelConfig>,
+    project_path: PathBuf,
+) -> Option<tokio::sync::mpsc::Sender<kb::KBUpdate>> {
+    if let Some(features) = &config.features {
+        if features.enable_knowledge_base {
+            if let Some(kb_config) = &config.knowledge_base {
+                if let Ok(db) = kb::VectorDB::new(
+                    &kb_config.vector_db_url,
+                    config.primary_model.embedding_dimension(),
+                ) {
+                    let db = Arc::new(db);
+                    let manager =
+                        Arc::new(kb::KBManager::new(Arc::clone(&db), &config, &project_path));
+
+                    let (tx_kb, rx_kb) = tokio::sync::mpsc::channel(100);
+
+                    let manager_init = Arc::clone(&manager);
+                    let kb_config_init = kb_config.clone();
+
+                    thread::spawn(move || {
+                        let rt = tokio::runtime::Runtime::new().unwrap();
+                        rt.block_on(async {
+                            // Intentar conectar con Qdrant con reintentos para dar tiempo a que inicie
+                            let mut connected = false;
+                            for i in 1..=5 {
+                                if let Ok(_) = db.initialize_collection().await {
+                                    connected = true;
+                                    break;
+                                }
+                                if i < 5 {
+                                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                }
+                            }
+
+                            if !connected {
+                                println!(
+                                    "   ℹ️  KB: {} (Qdrant no respondió en 127.0.0.1:6334 tras varios intentos)",
+                                    "Modo Offline".yellow()
+                                );
+                                return;
+                            }
+
+                            if kb_config_init.index_on_start {
+                                println!("   🧠 KB: Iniciando indexación del codebase...");
+                                if let Err(e) = manager_init.initial_index().await {
+                                    println!("   ⚠️  KB: Error en indexación inicial: {}", e);
+                                } else {
+                                    println!("   ✅ KB: Indexación inicial completada.");
+                                }
+                            }
+
+                            manager_init.start_background_task(rx_kb).await;
+                        });
+                    });
+                    return Some(tx_kb);
+                }
+            }
+        }
+    }
+    None
 }

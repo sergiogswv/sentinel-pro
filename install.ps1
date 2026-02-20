@@ -1,5 +1,5 @@
 # Sentinel Rust - Script de instalación para Windows PowerShell
-# Versión: 4.5.0
+# Versión: 5.0.0-pro
 
 # Configurar para detener en errores
 $ErrorActionPreference = "Stop"
@@ -9,10 +9,10 @@ function Show-Banner {
     Write-Host ""
     Write-Host "╔═══════════════════════════════════════════════════════════╗" -ForegroundColor Blue
     Write-Host "║                                                           ║" -ForegroundColor Blue
-    Write-Host "║              🛡️  SENTINEL RUST INSTALLER 🛡️               ║" -ForegroundColor Blue
+    Write-Host "║              🛡️  SENTINEL INSTALLER 🛡️                   ║" -ForegroundColor Blue
     Write-Host "║                                                           ║" -ForegroundColor Blue
     Write-Host "║           AI-Powered Code Quality Guardian                ║" -ForegroundColor Blue
-    Write-Host "║                    Version 4.5.0                          ║" -ForegroundColor Blue
+    Write-Host "║                    Version 5.0.0-pro                      ║" -ForegroundColor Blue
     Write-Host "║                                                           ║" -ForegroundColor Blue
     Write-Host "╚═══════════════════════════════════════════════════════════╝" -ForegroundColor Blue
     Write-Host ""
@@ -53,47 +53,35 @@ try {
 $rustcVersion = rustc --version
 Show-Info "Versión de Rust: $rustcVersion"
 
-# Compilar el proyecto
-Show-Info "Compilando Sentinel Rust..."
+# Compilar e Instalar el proyecto globalmente
+Show-Info "Instalando Sentinel Pro globalmente con cargo..."
 try {
-    cargo build --release
-    Show-Success "Compilación exitosa"
+    # Usamos cargo install para que esté disponible en cualquier terminal automáticamente
+    cargo install --path . --force
+    Show-Success "Sentinel ha sido instalado en tu directorio de binarios de Rust (~\.cargo\bin)"
 } catch {
-    Show-Error "Falló la compilación del proyecto"
+    Show-Error "Falló la instalación vía cargo. Asegúrate de que no haya procesos de Sentinel abiertos."
 }
 
-# Crear directorio de instalación
+# Crear directorio de casa de Sentinel para recursos (Qdrant, Modelos, etc.)
 $installDir = "$env:USERPROFILE\.sentinel-pro"
-Show-Info "Creando directorio de instalación en $installDir..."
+Show-Info "Configurando directorio de recursos en $installDir..."
 if (-not (Test-Path $installDir)) {
     New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 }
 
-# Copiar el binario
-Show-Info "Instalando binario..."
-$binarySource = "target\release\sentinel-pro.exe"
-$binaryDest = "$installDir\sentinel-pro.exe"
-
-if (-not (Test-Path $binarySource)) {
-    Show-Error "No se encontró el binario compilado en $binarySource"
-}
-
-Copy-Item $binarySource $binaryDest -Force
-Show-Success "Binario instalado en $binaryDest"
-
-# Agregar al PATH del usuario si no está
-Show-Info "Verificando PATH del sistema..."
+# Verificar PATH para el folder de Cargo (standard)
+$cargoBin = "$env:USERPROFILE\.cargo\bin"
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notlike "*$installDir*") {
-    Show-Info "Agregando Sentinel al PATH del usuario..."
-    [Environment]::SetEnvironmentVariable(
-        "Path",
-        "$userPath;$installDir",
-        "User"
-    )
-    Show-Success "PATH actualizado. Por favor reinicia tu terminal para aplicar los cambios."
+
+if ($userPath -notlike "*$cargoBin*") {
+    Show-Info "Agregando .cargo\bin al PATH para que 'sentinel' funcione en cualquier parte..."
+    $newPath = if ($userPath.EndsWith(';')) { "$userPath$cargoBin" } else { "$userPath;$cargoBin" }
+    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+    $env:Path += ";$cargoBin"
+    Show-Success "PATH de Cargo actualizado."
 } else {
-    Show-Info "Sentinel ya está en el PATH"
+    Show-Info "Directorio de binarios ya está en el PATH."
 }
 
 # Crear archivo de configuración de ejemplo si no existe
@@ -129,6 +117,54 @@ max_tokens = 4000
     Show-Success "Archivo de configuración creado en $configFile"
 }
 
+# --- SECCIÓN QDRANT ---
+Write-Host ""
+$choice = Read-Host "❓ ¿Deseas instalar Qdrant (Vector Database) automáticamente? (s/n)"
+if ($choice -eq 's' -or $choice -eq 'S') {
+    Show-Info "Iniciando instalación de Qdrant..."
+    
+    $qdrantBaseDir = "$installDir\qdrant"
+    if (-not (Test-Path $qdrantBaseDir)) {
+        New-Item -ItemType Directory -Path $qdrantBaseDir -Force | Out-Null
+    }
+
+    try {
+        Show-Info "Obteniendo última versión de Qdrant desde GitHub..."
+        $githubApiUrl = "https://api.github.com/repos/qdrant/qdrant/releases/latest"
+        $latestRelease = Invoke-RestMethod -Uri $githubApiUrl -UseBasicParsing
+        $version = $latestRelease.tag_name
+        
+        $downloadUrl = "https://github.com/qdrant/qdrant/releases/download/$version/qdrant-x86_64-pc-windows-msvc.zip"
+        $zipFile = "$qdrantBaseDir\qdrant.zip"
+        
+        Show-Info "Descargando Qdrant $version..."
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipFile
+        
+        Show-Info "Extrayendo archivos..."
+        Expand-Archive -Path $zipFile -DestinationPath $qdrantBaseDir -Force
+        Remove-Item $zipFile
+        
+        # Crear script de inicio rápido para Qdrant
+        $qdrantRunScript = "$qdrantBaseDir\run-qdrant.ps1"
+        $runContent = @"
+# Script para iniciar Qdrant localmente
+Set-Location -Path "`$PSScriptRoot"
+.\qdrant.exe
+"@
+        Set-Content -Path $qdrantRunScript -Value $runContent -Encoding UTF8
+        
+        Show-Success "Qdrant instalado en $qdrantBaseDir"
+        Show-Info "Puedes iniciarlo ejecutando: $qdrantRunScript"
+        
+        $installQdrantPath = $true
+    } catch {
+        Show-Error "No se pudo instalar Qdrant automáticamente: $($_.Exception.Message)"
+    }
+} else {
+    Show-Info "Omitiendo instalación automática de Qdrant. Puedes instalarlo manualmente después."
+    $installQdrantPath = $false
+}
+
 # Mostrar mensaje de éxito
 Write-Host ""
 Write-Host "╔═══════════════════════════════════════════════════════════╗" -ForegroundColor Green
@@ -148,9 +184,9 @@ Write-Host ""
 Write-Host "3. Copia sentinel.toml a tu proyecto:" -ForegroundColor White
 Write-Host "   Copy-Item $configFile C:\ruta\a\tu\proyecto\" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "4. Ejecuta Sentinel Pro en tu proyecto:" -ForegroundColor White
+Write-Host "4. Ejecuta Sentinel en tu proyecto:" -ForegroundColor White
 Write-Host "   cd C:\ruta\a\tu\proyecto" -ForegroundColor Yellow
-Write-Host "   sentinel-pro" -ForegroundColor Yellow
+Write-Host "   sentinel" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "🎉 ¡Disfruta de Sentinel Pro!" -ForegroundColor Green
 Write-Host ""

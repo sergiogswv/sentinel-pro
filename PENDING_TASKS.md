@@ -103,7 +103,7 @@ Enfoque: Escenarios complejos multi-paso.
 - [x] **6.1 Workflows Multi-Step**
   - [x] Arquitectura `Workflow` y `WorkflowEngine`.
   - [x] Workflows predefinidos: `fix-and-verify`, `review-security`.
-  - [x] Comando `sentinel-pro pro workflow <name>`.
+  - [x] Comando `sentinel pro workflow <name>`.
 
 - [x] **6.2 Migración y Optimización**
   - [x] Comando `migrate <src> <dst>` (Framework migration).

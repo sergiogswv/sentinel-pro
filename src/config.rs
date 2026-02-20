@@ -29,12 +29,16 @@ pub struct ModelConfig {
 impl ModelConfig {
     pub fn embedding_dimension(&self) -> u64 {
         match self.provider.as_str() {
-            "local" | "anthropic" => 384, // all-MiniLM-L6-v2 local model
+            "local" | "anthropic" => 384,   // all-MiniLM-L6-v2 local model
             "openai" | "lm-studio" => 1536, // typical default for OpenAI embeddings
             "ollama" => {
-                if self.name.contains("mxbai") { 1024 }
-                else if self.name.contains("all-minilm") { 384 }
-                else { 768 } // fallback for llama2/nomic
+                if self.name.contains("mxbai") {
+                    1024
+                } else if self.name.contains("all-minilm") {
+                    384
+                } else {
+                    768
+                } // fallback for llama2/nomic
             }
             _ => 768, // Default (Google Gemini, etc.)
         }
@@ -120,7 +124,7 @@ pub struct SentinelConfig {
 }
 
 impl SentinelConfig {
-    pub fn default(
+    pub fn create_default(
         name: String,
         manager: String,
         framework: String,
@@ -179,7 +183,7 @@ impl SentinelConfig {
                 bug_predictor_model: "bug-predictor-v1".to_string(),
             }),
             knowledge_base: Some(KnowledgeBaseConfig {
-                vector_db_url: "http://localhost:6334".to_string(),
+                vector_db_url: "http://127.0.0.1:6334".to_string(),
                 index_on_start: true,
             }),
         }
@@ -346,7 +350,7 @@ impl SentinelConfig {
                 vec!["{name}.test.{ext}".to_string()]
             };
 
-            let mut new_config = Self::default(
+            let mut new_config = Self::create_default(
                 nombre,
                 gestor,
                 framework,
@@ -493,22 +497,6 @@ impl SentinelConfig {
             };
         }
 
-        // Asegurar que existan secciones de Pro Features (v5.0.0+)
-        if config.features.is_none() {
-            config.features = Some(FeaturesConfig {
-                enable_ml: true,
-                enable_agents: true,
-                enable_knowledge_base: true,
-            });
-        }
-
-        if config.knowledge_base.is_none() {
-            config.knowledge_base = Some(KnowledgeBaseConfig {
-                vector_db_url: "http://localhost:6333".to_string(),
-                index_on_start: true,
-            });
-        }
-
         // Asegurar que existan secciones de Pro Features (v5.0.0+) con defaults sanos
         if config.features.is_none() {
             config.features = Some(FeaturesConfig {
@@ -520,7 +508,7 @@ impl SentinelConfig {
 
         if config.knowledge_base.is_none() {
             config.knowledge_base = Some(KnowledgeBaseConfig {
-                vector_db_url: "http://localhost:6333".to_string(), // REST port
+                vector_db_url: "http://127.0.0.1:6334".to_string(),
                 index_on_start: true,
             });
         }
@@ -537,7 +525,7 @@ impl SentinelConfig {
         if !config.primary_model.url.contains("://") && !config.primary_model.url.is_empty() {
             config.primary_model.url = format!("http://{}", config.primary_model.url);
         }
-        
+
         if let Some(kb) = &mut config.knowledge_base {
             if !kb.vector_db_url.contains("://") && !kb.vector_db_url.is_empty() {
                 kb.vector_db_url = format!("http://{}", kb.vector_db_url);
@@ -608,6 +596,63 @@ impl SentinelConfig {
 
         archivos.sort();
         archivos
+    }
+
+    /// Devuelve la ruta al directorio home de Sentinel (~/.sentinel-pro)
+    pub fn get_sentinel_home() -> std::path::PathBuf {
+        let home = if cfg!(windows) {
+            std::env::var("USERPROFILE")
+                .map(std::path::PathBuf::from)
+                .ok()
+        } else {
+            std::env::var("HOME").map(std::path::PathBuf::from).ok()
+        };
+
+        home.unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".sentinel-pro")
+    }
+
+    /// Busca el archivo .sentinelrc.toml caminando hacia arriba por las carpetas
+    pub fn find_project_root() -> Option<std::path::PathBuf> {
+        let mut current_dir = std::env::current_dir().ok()?;
+
+        loop {
+            if current_dir.join(".sentinelrc.toml").exists() {
+                return Some(current_dir);
+            }
+
+            if !current_dir.pop() {
+                break;
+            }
+        }
+
+        // Si no se encuentra subiendo, probar con el último proyecto activo guardado globalmente
+        Self::get_active_project()
+    }
+
+    /// Guarda la ruta del proyecto actual como el proyecto "activo" globalmente
+    pub fn save_active_project(path: &Path) -> anyhow::Result<()> {
+        let sentinel_home = Self::get_sentinel_home();
+        if !sentinel_home.exists() {
+            fs::create_dir_all(&sentinel_home)?;
+        }
+        let active_path = sentinel_home.join("active_project");
+        fs::write(active_path, path.to_string_lossy().to_string())?;
+        Ok(())
+    }
+
+    /// Obtiene la ruta del último proyecto activo
+    pub fn get_active_project() -> Option<std::path::PathBuf> {
+        let active_path = Self::get_sentinel_home().join("active_project");
+        if active_path.exists() {
+            if let Ok(content) = fs::read_to_string(active_path) {
+                let path = std::path::PathBuf::from(content.trim());
+                if path.exists() {
+                    return Some(path);
+                }
+            }
+        }
+        None
     }
 
     pub fn eliminar(path: &Path) -> anyhow::Result<()> {

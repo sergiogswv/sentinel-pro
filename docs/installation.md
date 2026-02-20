@@ -16,13 +16,55 @@ git clone https://github.com/<tu-usuario>/sentinel-rust.git
 cd sentinel-rust
 ```
 
-### 2. Compile in release mode
+### 2. General Installation (Quickest)
 
+#### Windows (PowerShell)
+The easiest way to install Sentinel on Windows is using the provided PowerShell script. Open PowerShell as Administrator and run:
+
+```powershell
+./install.ps1
+```
+*This script will compile the project, install the binary in `~/.sentinel-pro`, and add it to your user PATH.*
+
+> 💡 **Tip:** If the command `sentinel` is not recognized immediately after running the script, try closing and reopening your terminal. In PowerShell, you can also run `$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")` to refresh the PATH without restarting.
+
+#### Linux / macOS
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+### 3. Manual Installation (Alternative)
+
+If you prefer to compile manually:
+
+#### Compile in release mode
 ```bash
 cargo build --release
 ```
 
-The compiled binary will be located at `target/release/sentinel-pro` (or `sentinel-pro.exe` on Windows).
+The compiled binary will be located at `target/release/sentinel` (or `target/release/sentinel.exe` on Windows).
+
+4. Add to PATH (Windows)
+If you compiled manually, it's recommended to add the binary to your PATH:
+1. Copy `target/release/sentinel.exe` to a permanent folder (e.g., `%USERPROFILE%\.sentinel-pro\`).
+2. Add that folder to your System or User Environment PATH.
+
+### 4. Vector Database (Qdrant)
+
+Sentinel uses **Qdrant** for its interactive knowledge base.
+
+#### Windows (Automatic)
+When running `install.ps1`, you will be asked if you want to install Qdrant automatically. If you accept:
+- It will download the latest version from GitHub.
+- It will be installed in `~/.sentinel-pro/qdrant/`.
+- A startup script will be created at `~/.sentinel-pro/qdrant/run-qdrant.ps1`.
+
+#### Manual Installation
+If you prefer to do it yourself:
+1. Download Qdrant from the [official GitHub releases](https://github.com/qdrant/qdrant/releases).
+2. Extract the binary and run it before starting Sentinel if you want to use the Knowledge Base features.
+3. Sentinel expects Qdrant to be running at `http://localhost:6333` by default.
 
 ## Initial Configuration
 
@@ -106,7 +148,7 @@ mi-proyecto/
 cargo run
 
 # Or using the compiled binary
-./target/release/sentinel-pro
+./target/release/sentinel
 ```
 
 When starting, you will see:

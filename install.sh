@@ -1,6 +1,6 @@
 #!/bin/bash
 # Sentinel Rust - Script de instalación para Linux/macOS
-# Versión: 4.5.0
+# Versión: 5.0.0-pro
 
 set -e
 
@@ -14,10 +14,10 @@ NC='\033[0m' # No Color
 echo -e "${BLUE}"
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║                                                           ║"
-echo "║              🛡️  SENTINEL RUST INSTALLER 🛡️               ║"
+echo "║              🛡️  SENTINEL INSTALLER 🛡️                   ║"
 echo "║                                                           ║"
 echo "║           AI-Powered Code Quality Guardian                ║"
-echo "║                    Version 4.5.0                          ║"
+echo "║                    Version 5.0.0-pro                      ║"
 echo "║                                                           ║"
 echo "╚═══════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
@@ -57,7 +57,7 @@ success "Compilación exitosa"
 # Crear directorio de instalación
 # Preferimos ~/.local/bin si existe, sino ~/.sentinel-pro
 INSTALL_DIR="$HOME/.sentinel-pro"
-BIN_NAME="sentinel-pro"
+BIN_NAME="sentinel"
 
 if [ -d "$HOME/.local/bin" ] && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
     INSTALL_DIR="$HOME/.local/bin"
@@ -69,7 +69,13 @@ fi
 
 # Copiar el binario
 info "Instalando binario en $INSTALL_DIR..."
-cp target/release/sentinel-pro "$INSTALL_DIR/$BIN_NAME" || error "Falló la copia del binario"
+# Limpiar binarios antiguos (homologación)
+if [ -f "$INSTALL_DIR/sentinel-pro" ]; then
+    info "Eliminando binario antiguo (sentinel-pro)..."
+    rm "$INSTALL_DIR/sentinel-pro"
+fi
+
+cp target/release/sentinel "$INSTALL_DIR/$BIN_NAME" || error "Falló la copia del binario"
 chmod +x "$INSTALL_DIR/$BIN_NAME"
 success "Binario instalado en $INSTALL_DIR/$BIN_NAME"
 
@@ -82,14 +88,14 @@ elif [ -f "$HOME/.zshrc" ]; then
 fi
 
 if [ -n "$SHELL_RC" ]; then
-    if ! grep -q "sentinel-pro" "$SHELL_RC"; then
-        info "Agregando Sentinel Pro al PATH en $SHELL_RC..."
+    if ! grep -q "sentinel" "$SHELL_RC"; then
+        info "Agregando Sentinel al PATH en $SHELL_RC..."
         echo "" >> "$SHELL_RC"
         echo "# Sentinel Pro" >> "$SHELL_RC"
         echo "export PATH=\"\$HOME/.sentinel-pro:\$PATH\"" >> "$SHELL_RC"
         success "PATH actualizado. Por favor ejecuta: source $SHELL_RC"
     else
-        info "Sentinel Pro ya está en el PATH"
+        info "Sentinel ya está en el PATH"
     fi
 fi
 

@@ -1,3 +1,7 @@
 /target
 .claude/*
 /*.backup.*
+/storage/
+.sentinelrc.toml
+errors.txt
+.qdrant-initialized

@@ -49,16 +49,19 @@ Real-time monitoring tool written in **Rust** that analyzes code changes using *
 
 ### Installation
 
-```bash
-# 1. Clone the repository
+#### Windows (PowerShell)
+```powershell
 git clone https://github.com/your-username/sentinel-rust.git
 cd sentinel-rust
+./install.ps1
+```
+*(Note: You may need to restart your terminal after installation for the `sentinel` command to be recognized)*
 
-# 2. Build
+#### Linux / macOS
+```bash
+git clone https://github.com/your-username/sentinel-rust.git
+cd sentinel-rust
 cargo build --release
-
-# 3. Run
-./target/release/sentinel-rust
 ```
 
 On first use, Sentinel will start an **interactive configuration wizard**.

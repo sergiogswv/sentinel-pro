@@ -8,8 +8,10 @@ use colored::*;
 use std::fs;
 
 use crate::stats::SentinelStats;
-use std::sync::{Arc, Mutex};
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// Muestra el banner ASCII art de Sentinel al inicio del programa
 pub fn mostrar_banner() {
@@ -48,7 +50,7 @@ pub fn mostrar_banner() {
     );
 }
 
-use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
+use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 
 /// Presenta un menú interactivo para seleccionar un proyecto del directorio padre.
 ///
@@ -130,7 +132,14 @@ pub fn mostrar_ayuda(config: Option<&SentinelConfig>) {
         "  m       Ver dashboard de métricas (bugs, costos, tokens)".dimmed()
     );
     println!("{}", "  l       Limpiar caché de respuestas de IA".dimmed());
-    println!("{}", "  a       Ejecutar auditoría interactiva (Pro Audit)".dimmed());
+    println!(
+        "{}",
+        "  a       Ejecutar auditoría interactiva (Pro Audit)".dimmed()
+    );
+    println!(
+        "{}",
+        "  k       Re-intentar conexión Knowledge Base (Qdrant)".dimmed()
+    );
 
     // Mostrar comando T solo si hay testing configurado
     if let Some(cfg) = config {
@@ -153,27 +162,77 @@ pub fn mostrar_ayuda(config: Option<&SentinelConfig>) {
         "{}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".bright_cyan()
     );
-    println!("{}", "🚀 COMANDOS PRO (Ejecutar en terminal)".bright_magenta().bold());
-    println!("  sentinel-pro pro analyze <file>   {}", "Análisis arquitectónico (Reviewer)".dimmed());
-    println!("  sentinel-pro pro generate <file>  {}", "Generación de código (Coder)".dimmed());
-    println!("  sentinel-pro pro refactor <file>  {}", "Refactorización (Refactor)".dimmed());
-    println!("  sentinel-pro pro fix <file>       {}", "Corrección de bugs".dimmed());
-    println!("  sentinel-pro pro test-all         {}", "Generación de tests (Tester)".dimmed());
-    println!("  sentinel-pro pro audit <path>     {}", "Auditoría interactiva + Fixes".dimmed());
-    println!("  sentinel-pro pro chat             {}", "Chat con el codebase".dimmed());
-    println!("  sentinel-pro pro docs <dir>       {}", "Generar documentación".dimmed());
+    println!(
+        "{}",
+        "🚀 COMANDOS PRO (Ejecutar en terminal)"
+            .bright_magenta()
+            .bold()
+    );
+    println!(
+        "  sentinel pro analyze <file>   {}",
+        "Análisis arquitectónico (Reviewer)".dimmed()
+    );
+    println!(
+        "  sentinel pro generate <file>  {}",
+        "Generación de código (Coder)".dimmed()
+    );
+    println!(
+        "  sentinel pro refactor <file>  {}",
+        "Refactorización (Refactor)".dimmed()
+    );
+    println!(
+        "  sentinel pro fix <file>       {}",
+        "Corrección de bugs".dimmed()
+    );
+    println!(
+        "  sentinel pro test-all         {}",
+        "Generación de tests (Tester)".dimmed()
+    );
+    println!(
+        "  sentinel pro audit <path>     {}",
+        "Auditoría interactiva + Fixes".dimmed()
+    );
+    println!(
+        "  sentinel pro chat             {}",
+        "Chat con el codebase".dimmed()
+    );
+    println!(
+        "  sentinel pro docs <dir>       {}",
+        "Generar documentación".dimmed()
+    );
     println!(
         "{}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".bright_cyan()
     );
     println!("{}", "🔮 COMANDOS AVANZADOS".bright_magenta().bold());
-    println!("  sentinel-pro pro workflow <name>  {}", "Ejecutar workflows:".dimmed());
-    println!("  {}", "                                  - fix-and-verify (Fix + Refactor + Test)".dimmed());
-    println!("  {}", "                                  - review-security (Audit + Mitigate)".dimmed());
-    println!("  sentinel-pro pro migrate <s, d>   {}", "Migrar código entre frameworks".dimmed());
-    println!("  sentinel-pro pro review           {}", "Auditoría completa de proyecto".dimmed());
-    println!("  sentinel-pro pro explain <file>   {}", "Explicación didáctica de código".dimmed());
-    println!("  sentinel-pro pro optimize <file>  {}", "Sugerencias de optimización".dimmed());
+    println!(
+        "  sentinel pro workflow <name>  {}",
+        "Ejecutar workflows:".dimmed()
+    );
+    println!(
+        "  {}",
+        "                                  - fix-and-verify (Fix + Refactor + Test)".dimmed()
+    );
+    println!(
+        "  {}",
+        "                                  - review-security (Audit + Mitigate)".dimmed()
+    );
+    println!(
+        "  sentinel pro migrate <s, d>   {}",
+        "Migrar código entre frameworks".dimmed()
+    );
+    println!(
+        "  sentinel pro review           {}",
+        "Auditoría completa de proyecto".dimmed()
+    );
+    println!(
+        "  sentinel pro explain <file>   {}",
+        "Explicación didáctica de código".dimmed()
+    );
+    println!(
+        "  sentinel pro optimize <file>  {}",
+        "Sugerencias de optimización".dimmed()
+    );
     println!(
         "{}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n".bright_cyan()
@@ -193,6 +252,7 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
     let mut config = if let Some(cfg) = SentinelConfig::load(project_path) {
         println!("{}", "🔄 Configuración existente encontrada".yellow());
         println!("   💾 Preservando API keys y configuraciones personalizadas...");
+        let _ = SentinelConfig::save_active_project(project_path);
         cfg
     } else {
         // Nueva configuración - pedir API keys
@@ -201,7 +261,7 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
             "🚀 Configurando nuevo proyecto en Sentinel...".bright_cyan()
         );
 
-        let mut config = SentinelConfig::default(
+        let mut config = SentinelConfig::create_default(
             nombre.clone(),
             gestor.clone(),
             "Detectando...".to_string(),
@@ -261,11 +321,12 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
         let env_url = std::env::var(format!("{}_BASE_URL", provider_str.to_uppercase())).ok();
         let env_key = std::env::var(format!("{}_API_KEY", provider_str.to_uppercase())).ok();
 
-        config.primary_model.url = dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt(format!("URL de la API para {}", provider_str))
-            .default(env_url.unwrap_or(default_url))
-            .interact_text()
-            .unwrap_or_default();
+        config.primary_model.url =
+            dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                .with_prompt(format!("URL de la API para {}", provider_str))
+                .default(env_url.unwrap_or(default_url))
+                .interact_text()
+                .unwrap_or_default();
 
         let api_key_prompt = if provider_str == "ollama" {
             "API Key (opcional para Ollama)"
@@ -273,12 +334,13 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
             "API Key"
         };
 
-        config.primary_model.api_key = dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt(format!("{} para {}", api_key_prompt, provider_str))
-            .allow_empty(provider_str == "ollama")
-            .default(env_key.unwrap_or_else(|| String::new()))
-            .interact_text()
-            .unwrap_or_default();
+        config.primary_model.api_key =
+            dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                .with_prompt(format!("{} para {}", api_key_prompt, provider_str))
+                .allow_empty(provider_str == "ollama")
+                .default(env_key.unwrap_or_else(|| String::new()))
+                .interact_text()
+                .unwrap_or_default();
 
         let default_model = match provider_str {
             "anthropic" => "claude-3-5-sonnet-20241022".to_string(),
@@ -300,13 +362,14 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
         ) {
             Ok(mut models) if !models.is_empty() => {
                 models.sort();
-                let selection = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                    .with_prompt(format!("Selecciona el modelo para {}", provider_str))
-                    .items(&models)
-                    .default(0)
-                    .interact()
-                    .unwrap_or(0);
-                
+                let selection =
+                    dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                        .with_prompt(format!("Selecciona el modelo para {}", provider_str))
+                        .items(&models)
+                        .default(0)
+                        .interact()
+                        .unwrap_or(0);
+
                 if selection < models.len() {
                     config.primary_model.name = models[selection].clone();
                 } else {
@@ -314,38 +377,45 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
                 }
             }
             Err(e) => {
-                println!("   ⚠️  No se pudieron obtener los modelos automáticamente: {}", e);
-                config.primary_model.name = dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                    .with_prompt("Ingresa el nombre del modelo manualmente")
-                    .default(default_model)
-                    .interact_text()
-                    .unwrap_or_default();
+                println!(
+                    "   ⚠️  No se pudieron obtener los modelos automáticamente: {}",
+                    e
+                );
+                config.primary_model.name =
+                    dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                        .with_prompt("Ingresa el nombre del modelo manualmente")
+                        .default(default_model)
+                        .interact_text()
+                        .unwrap_or_default();
             }
             _ => {
-                config.primary_model.name = dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                    .with_prompt("Ingresa el nombre del modelo manualmente")
-                    .default(default_model)
-                    .interact_text()
-                    .unwrap_or_default();
+                config.primary_model.name =
+                    dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                        .with_prompt("Ingresa el nombre del modelo manualmente")
+                        .default(default_model)
+                        .interact_text()
+                        .unwrap_or_default();
             }
         }
 
         // 2. Configurar Modelo de Fallback (Opcional)
-        let use_fallback = dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt("¿Deseas configurar un modelo de respaldo (fallback)?")
-            .default(false)
-            .interact()
-            .unwrap_or(false);
+        let use_fallback =
+            dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                .with_prompt("¿Deseas configurar un modelo de respaldo (fallback)?")
+                .default(false)
+                .interact()
+                .unwrap_or(false);
 
         if use_fallback {
             let mut fb = crate::config::ModelConfig::default();
-            
-            let selection = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                .with_prompt("Selecciona un proveedor de IA para fallback")
-                .items(&providers)
-                .default(0)
-                .interact()
-                .unwrap_or(0);
+
+            let selection =
+                dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                    .with_prompt("Selecciona un proveedor de IA para fallback")
+                    .items(&providers)
+                    .default(0)
+                    .interact()
+                    .unwrap_or(0);
 
             let fb_provider = match selection {
                 0 => "anthropic",
@@ -382,34 +452,40 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
                 .interact_text()
                 .unwrap_or_default();
 
-            println!("🔍 Conectando con {} para obtener modelos de fallback...", fb_provider);
+            println!(
+                "🔍 Conectando con {} para obtener modelos de fallback...",
+                fb_provider
+            );
             match ai::obtener_modelos_disponibles(&fb.provider, &fb.url, &fb.api_key) {
                 Ok(mut models) if !models.is_empty() => {
                     models.sort();
-                    let selection = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                        .with_prompt("Selecciona el modelo de fallback")
-                        .items(&models)
-                        .default(0)
-                        .interact()
-                        .unwrap_or(0);
+                    let selection =
+                        dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                            .with_prompt("Selecciona el modelo de fallback")
+                            .items(&models)
+                            .default(0)
+                            .interact()
+                            .unwrap_or(0);
                     fb.name = models[selection].clone();
                 }
                 _ => {
-                    fb.name = dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                        .with_prompt("Ingresa el nombre del modelo de fallback manualmente")
-                        .interact_text()
-                        .unwrap_or_default();
+                    fb.name =
+                        dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                            .with_prompt("Ingresa el nombre del modelo de fallback manualmente")
+                            .interact_text()
+                            .unwrap_or_default();
                 }
             }
             config.fallback_model = Some(fb);
         }
 
         // 3. Configurar Características Pro
-        let enable_pro = dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt("¿Habilitar Machine Learning y Knowledge Base Local?")
-            .default(true)
-            .interact()
-            .unwrap_or(true);
+        let enable_pro =
+            dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                .with_prompt("¿Habilitar Machine Learning y Knowledge Base Local?")
+                .default(true)
+                .interact()
+                .unwrap_or(true);
 
         if enable_pro {
             config.features = Some(crate::config::FeaturesConfig {
@@ -437,7 +513,8 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
 
     // Detectar framework con IA (silenciosamente)
     let stats_for_detection = Arc::new(Mutex::new(SentinelStats::cargar(project_path)));
-    let deteccion = match ai::detectar_framework_con_ia(project_path, &config, stats_for_detection) {
+    let deteccion = match ai::detectar_framework_con_ia(project_path, &config, stats_for_detection)
+    {
         Ok(d) => d,
         Err(e) => {
             println!(
@@ -464,7 +541,11 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
         }
     };
 
-    // Comparar con framework actual
+    // --- Verificación Pro-activa de Qdrant (v5.0 Pro) ---
+    verificar_qdrant_proactivo(&mut config, project_path);
+
+    // Si ya existe configuración y el framework no ha cambiado, no molestamos con re-detección
+    // EXCEPTO para testing si no está configurado.
     if tiene_config_existente && deteccion.framework == framework_actual {
         println!(
             "   ✓ Framework: {} (sin cambios)",
@@ -480,7 +561,7 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
                     ai::TestingStatus::Incomplete => "incomplete".to_string(),
                     ai::TestingStatus::Missing => "missing".to_string(),
                 });
-                
+
                 ayudar_configurar_testing(&mut config, testing_info);
                 let _ = config.save(project_path);
             }
@@ -551,14 +632,117 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
 
     let _ = config.save(project_path);
     println!("{}", "✅ Configuración actualizada.".green());
+
     config
 }
 
+/// Verifica si Qdrant está en ejecución y ofrece iniciarlo si se detecta localmente.
+fn verificar_qdrant_proactivo(config: &mut SentinelConfig, project_path: &Path) {
+    // --- Verificación Pro-activa de Qdrant (v5.0 Pro) ---
+    // Se ejecuta siempre, incluso si el framework no cambió, para asegurar que el motor vectorial esté listo.
+    if let Some(ref mut kb) = config.knowledge_base {
+        if kb.index_on_start {
+            // 1. Intentar conectar a la URL configurada
+            let mut current_url_valid = false;
+            let target = kb
+                .vector_db_url
+                .replace("http://", "")
+                .replace("https://", "");
+            if let Some((host, port_str)) = target.split_once(':') {
+                let port = port_str.parse::<u16>().unwrap_or(6334);
+                let actual_host = if host == "localhost" {
+                    "127.0.0.1"
+                } else {
+                    host
+                };
+
+                if let Ok(addr) =
+                    format!("{}:{}", actual_host, port).parse::<std::net::SocketAddr>()
+                {
+                    current_url_valid =
+                        std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300))
+                            .is_ok();
+                }
+            }
+
+            let mut is_running = current_url_valid;
+
+            // 2. Si falló, intentar con el "Heal" (127.0.0.1:6334)
+            if !is_running
+                && (kb.vector_db_url.contains("localhost") || kb.vector_db_url.contains("6333"))
+            {
+                let healed_addr: std::net::SocketAddr = "127.0.0.1:6334".parse().unwrap();
+                if std::net::TcpStream::connect_timeout(&healed_addr, Duration::from_millis(300))
+                    .is_ok()
+                {
+                    println!(
+                        "   🔧 {} Detectado Qdrant en 127.0.0.1:6334. Actualizando configuración...",
+                        "Auto-Fix:".cyan()
+                    );
+                    kb.vector_db_url = "http://127.0.0.1:6334".to_string();
+                    is_running = true;
+                    // Persistir el cambio inmediatamente
+                    let _ = config.save(project_path);
+                }
+            }
+
+            if !is_running {
+                let sentinel_home = SentinelConfig::get_sentinel_home();
+                let qdrant_bin = if cfg!(windows) {
+                    sentinel_home.join("qdrant").join("qdrant.exe")
+                } else {
+                    sentinel_home.join("qdrant").join("qdrant")
+                };
+
+                if qdrant_bin.exists() {
+                    println!(
+                        "\n🧠 {}",
+                        "Knowledge Base: Qdrant no está en ejecución.".yellow()
+                    );
+                    let iniciar = dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                        .with_prompt("Se detectó una instalación local de Qdrant. ¿Deseas iniciarla en segundo plano?")
+                        .default(true)
+                        .interact()
+                        .unwrap_or(false);
+
+                    if iniciar {
+                        println!("   🚀 Iniciando Qdrant...");
+                        let success = if cfg!(windows) {
+                            // En Windows, a veces Start-Process es caprichoso.
+                            // Intentamos simplemente ejecutarlo con spawn para que herede el entorno.
+                            Command::new("powershell")
+                                .args([
+                                    "-NoProfile",
+                                    "-Command",
+                                    &format!(
+                                        "Start-Job -ScriptBlock {{ & '{}' }}",
+                                        qdrant_bin.display()
+                                    ),
+                                ])
+                                .status()
+                                .is_ok()
+                        } else {
+                            Command::new("sh")
+                                .arg("-c")
+                                .arg(format!("'{}' > /dev/null 2>&1 &", qdrant_bin.display()))
+                                .status()
+                                .is_ok()
+                        };
+
+                        if success {
+                            println!("   ✅ Comando de inicio enviado.");
+                            println!("   ℹ️  Si no conecta, puedes iniciarlo manualmente con:");
+                            println!("      {}", format!("'{}'", qdrant_bin.display()).cyan());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Ayuda al usuario a configurar un framework de testing si no se detectó uno válido
-fn ayudar_configurar_testing(
-    config: &mut SentinelConfig,
-    testing_info: ai::TestingFrameworkInfo,
-) {
+fn ayudar_configurar_testing(config: &mut SentinelConfig, testing_info: ai::TestingFrameworkInfo) {
     if testing_info.status == ai::TestingStatus::Valid {
         return;
     }
@@ -570,7 +754,10 @@ fn ayudar_configurar_testing(
 
     if testing_info.suggestions.is_empty() {
         println!("   💡 Sentinel no detectó un framework de testing configurado.");
-        println!("   {} Tener tests siempre ayudará a mantener tu código sano y prevenir regresiones.", "👉".yellow());
+        println!(
+            "   {} Tener tests siempre ayudará a mantener tu código sano y prevenir regresiones.",
+            "👉".yellow()
+        );
         return;
     }
 
@@ -592,11 +779,17 @@ fn ayudar_configurar_testing(
 
     if selection < testing_info.suggestions.len() {
         let suggestion = &testing_info.suggestions[selection];
-        println!("\n🚀 Para instalar {}, ejecuta:", suggestion.framework.green());
+        println!(
+            "\n🚀 Para instalar {}, ejecuta:",
+            suggestion.framework.green()
+        );
         println!("   {}", suggestion.install_command.cyan().bold());
 
         let confirmar = Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt(format!("¿Deseas registrar '{}' como el framework oficial del proyecto?", suggestion.framework))
+            .with_prompt(format!(
+                "¿Deseas registrar '{}' como el framework oficial del proyecto?",
+                suggestion.framework
+            ))
             .default(true)
             .interact()
             .unwrap_or(false);
@@ -604,7 +797,64 @@ fn ayudar_configurar_testing(
         if confirmar {
             config.testing_framework = Some(suggestion.framework.clone());
             config.testing_status = Some("valid".to_string());
-            println!("   ✅ Framework {} registrado. No olvides ejecutar el comando de instalación.", suggestion.framework.green());
+            println!(
+                "   ✅ Framework {} registrado.",
+                suggestion.framework.green()
+            );
+
+            let auto_install = Confirm::with_theme(&ColorfulTheme::default())
+                .with_prompt("¿Deseas intentar ejecutar el comando de instalación automáticamente?")
+                .default(true)
+                .interact()
+                .unwrap_or(false);
+
+            if auto_install {
+                // Verificar si el comando de instalación parece ser un comando real o solo texto descriptivo
+                let is_real_command = !suggestion
+                    .install_command
+                    .to_lowercase()
+                    .contains("no requiere")
+                    && !suggestion.install_command.to_lowercase().contains("manual")
+                    && (suggestion.install_command.contains("npm")
+                        || suggestion.install_command.contains("yarn")
+                        || suggestion.install_command.contains("pnpm")
+                        || suggestion.install_command.contains("pip")
+                        || suggestion.install_command.contains("cargo")
+                        || suggestion.install_command.contains("go"));
+
+                if is_real_command {
+                    println!("   🚀 Ejecutando: {}", suggestion.install_command.cyan());
+
+                    let parts: Vec<&str> = suggestion.install_command.split_whitespace().collect();
+                    if !parts.is_empty() {
+                        let mut cmd = if cfg!(windows) {
+                            let mut c = Command::new("powershell");
+                            c.args(["-NoProfile", "-Command", &suggestion.install_command]);
+                            c
+                        } else {
+                            let mut c = Command::new("sh");
+                            c.args(["-c", &suggestion.install_command]);
+                            c
+                        };
+
+                        match cmd.status() {
+                            Ok(status) if status.success() => {
+                                println!("   ✅ Instalación completada con éxito.");
+                            }
+                            _ => {
+                                println!(
+                                    "   ⚠️  La instalación falló o fue cancelada. Es posible que debas ejecutarla manualmente."
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    println!("   💡 {}", "Este framework requiere configuración manual o no tiene un comando de instalación directo.".yellow());
+                    println!("   📝 Instrucción: {}", suggestion.install_command.cyan());
+                }
+            } else {
+                println!("   ℹ️  No olvides ejecutar el comando manualmente antes de empezar.");
+            }
         }
     } else if selection == options.len() - 1 {
         // Omitir
@@ -619,7 +869,7 @@ fn ayudar_configurar_testing(
             .with_prompt("Nombre del framework de testing (ej: Jest, Pytest)")
             .interact_text()
             .unwrap_or_default();
-        
+
         if !manual_fw.is_empty() {
             config.testing_framework = Some(manual_fw.clone());
             config.testing_status = Some("valid".to_string());
@@ -638,18 +888,46 @@ fn verificar_docker() -> bool {
 
 /// Asesor de configuración para la Knowledge Base (Qdrant)
 fn configurar_knowledge_base(config: &mut SentinelConfig) {
-    println!("\n🧠 {}", "Configuración de Knowledge Base".bright_magenta().bold());
+    println!(
+        "\n🧠 {}",
+        "Configuración de Knowledge Base".bright_magenta().bold()
+    );
     println!("   Sentinel utiliza Qdrant para dar 'memoria' a la IA sobre todo tu proyecto.");
 
-    let has_docker = verificar_docker();
-    let mut options = vec![];
-
-    if has_docker {
-        options.push("Ejecutar vía Docker (Recomendado)");
-    } else {
-        options.push("Descargar ejecutable nativo (GitHub)");
+    // 1. Verificar si ya está corriendo
+    if std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:6334".parse().unwrap(),
+        Duration::from_millis(500),
+    )
+    .is_ok()
+    {
+        println!("   ✅ Qdrant ya está en ejecución y respondiendo.");
+        config.knowledge_base = Some(crate::config::KnowledgeBaseConfig {
+            vector_db_url: "http://127.0.0.1:6334".to_string(),
+            index_on_start: true,
+        });
+        return;
     }
-    
+
+    // 2. Verificar si existe instalación en el home de Sentinel
+    let sentinel_home = SentinelConfig::get_sentinel_home();
+    let qdrant_bin = if cfg!(windows) {
+        sentinel_home.join("qdrant").join("qdrant.exe")
+    } else {
+        sentinel_home.join("qdrant").join("qdrant")
+    };
+
+    let has_docker = verificar_docker();
+    let bin_exists = qdrant_bin.exists();
+
+    let mut options = vec![];
+    if bin_exists {
+        options.push("Iniciar Qdrant local (Detectado en .sentinel-pro)");
+    }
+    if has_docker {
+        options.push("Ejecutar vía Docker");
+    }
+    options.push("Descargar/Reinstalar desde GitHub");
     options.push("Ignorar por ahora (Modo Offline)");
 
     let selection = Select::with_theme(&ColorfulTheme::default())
@@ -659,32 +937,85 @@ fn configurar_knowledge_base(config: &mut SentinelConfig) {
         .interact()
         .unwrap_or(options.len() - 1);
 
-    if selection == options.len() - 1 {
+    let selected_text = &options[selection];
+
+    if selected_text.contains("Ignorar") {
         println!("\n⚠️  {}", "Modo Offline seleccionado.".yellow());
-        println!("   Al omitir esto, la IA perderá el contexto global de otros archivos.");
-        println!("   Podrás habilitarlo después configurando Qdrant en localhost:6334.");
         config.knowledge_base = Some(crate::config::KnowledgeBaseConfig {
-            vector_db_url: "http://localhost:6333".to_string(),
+            vector_db_url: "http://127.0.0.1:6334".to_string(),
             index_on_start: false,
         });
         return;
     }
 
-    if has_docker && selection == 0 {
-        println!("\n🚀 Copia y ejecuta este comando en otra terminal para iniciar Qdrant:");
-        println!("   {}", "docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant".cyan().bold());
-    } else {
+    if selected_text.contains("Iniciar Qdrant local") {
+        println!("   🚀 Iniciando Qdrant en segundo plano...");
+        let success = if cfg!(windows) {
+            Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    &format!("Start-Job -ScriptBlock {{ & '{}' }}", qdrant_bin.display()),
+                ])
+                .status()
+                .is_ok()
+        } else {
+            Command::new("sh")
+                .arg("-c")
+                .arg(format!("'{}' > /dev/null 2>&1 &", qdrant_bin.display()))
+                .status()
+                .is_ok()
+        };
+
+        if success {
+            println!("   ✅ Comando de inicio enviado.");
+            println!("   ℹ️  Puede tardar unos segundos en estar listo.");
+            println!(
+                "   ℹ️  Comando manual: {}",
+                format!("'{}'", qdrant_bin.display()).cyan()
+            );
+        } else {
+            println!("   ❌ Error al enviar comando de inicio.");
+        }
+    } else if selected_text.contains("Docker") {
+        println!("\n🚀 Ejecutando Qdrant vía Docker en segundo plano...");
+        let status = Command::new("docker")
+            .args([
+                "run",
+                "-d",
+                "--name",
+                "sentinel-qdrant",
+                "-p",
+                "6333:6333",
+                "-p",
+                "6334:6334",
+                "qdrant/qdrant",
+            ])
+            .status();
+
+        if let Ok(s) = status {
+            if s.success() {
+                println!("   ✅ Contenedor Docker iniciado.");
+            } else {
+                println!(
+                    "   ⚠️  El comando Docker falló. Asegúrate de que el puerto 6333 esté libre."
+                );
+            }
+        }
+    } else if selected_text.contains("GitHub") {
         println!("\n📦 Instalación manual (Sin Docker):");
-        println!("   1. Descarga el binario de: {}", "https://github.com/qdrant/qdrant/releases".underline());
-        println!("   2. Dale permisos de ejecución: {}", "chmod +x qdrant".cyan());
-        println!("   3. Ejecútalo: {}", "./qdrant".cyan());
+        println!(
+            "   1. Descarga el binario de: {}",
+            "https://github.com/qdrant/qdrant/releases".underline()
+        );
+        println!("   2. Ejecútalo antes de iniciar Sentinel.");
     }
 
     config.knowledge_base = Some(crate::config::KnowledgeBaseConfig {
-        vector_db_url: "http://localhost:6333".to_string(),
+        vector_db_url: "http://127.0.0.1:6334".to_string(),
         index_on_start: true,
     });
-    
+
     println!("\n✅ Configuración de Knowledge Base guardada.");
 }
 

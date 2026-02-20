@@ -93,7 +93,20 @@ pub enum ProCommands {
     CleanCache {
         /// Archivo, directorio a limpiar (opcional, por defecto todo el proyecto)
         target: Option<String>,
-    }
+    },
+    /// Gestión de la Knowledge Base (Qdrant)
+    Kb {
+        #[command(subcommand)]
+        subcommand: KbCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum KbCommands {
+    /// Verifica la conexión con Qdrant
+    Check,
+    /// Intenta re-inicializar la conexión con el motor vectorial
+    Retry,
 }
 
 #[derive(Subcommand)]
