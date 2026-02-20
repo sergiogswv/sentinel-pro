@@ -2,6 +2,7 @@ use crate::agents::base::{AgentContext, Task, TaskResult, TaskType};
 use crate::agents::orchestrator::AgentOrchestrator;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use colored::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workflow {
@@ -54,12 +55,12 @@ impl WorkflowEngine {
         agent_context: &AgentContext,
         initial_file: Option<String>,
     ) -> anyhow::Result<WorkflowContext> {
-        println!("🚀 Iniciando Workflow: {}...", workflow.name);
+        println!("🚀 Iniciando Workflow: {}...", workflow.name.cyan().bold());
         
         let mut wf_context = WorkflowContext::new(initial_file);
 
         for (i, step) in workflow.steps.iter().enumerate() {
-            println!("\n   ➡️  Paso {}: {} ({})", i + 1, step.name, step.agent);
+            println!("\n   ➡️  Paso {}: {} ({})", (i + 1).to_string().yellow().bold(), step.name.bold(), step.agent.dimmed());
 
             // Construir la tarea real basada en la plantilla y el contexto actual
             let mut description = step.task_template.description.clone();
@@ -113,25 +114,73 @@ impl WorkflowEngine {
 
             match result {
                 Ok(result) => {
-                    // Si el agente generó artefactos (código), podríamos querer guardarlos AUTOMÁTICAMENTE
-                    // o actualizar el 'file_content' virtual para el siguiente paso.
-                    // Por ahora, solo guardamos el resultado en el historial.
-                    
-                    // Estrategia simple: Si es 'Refactor' o 'Fix' y hay artifacts, aplicarlos al archivo real
-                    // para que el siguiente paso (ej: Verification) lea el archivo actualizado.
+                    // Aplicar cambios si el agente generó código y es una tarea que debe modificar el archivo
                     if !result.artifacts.is_empty() && wf_context.current_file.is_some() {
+                        let is_mutation = task.task_type == TaskType::Fix || task.task_type == TaskType::Refactor;
                         let path_str = wf_context.current_file.as_ref().unwrap();
-                        match crate::files::secure_join(&agent_context.project_root, std::path::Path::new(path_str)) {
-                            Ok(safe_path) => {
-                                if let Err(e) = std::fs::write(&safe_path, &result.artifacts[0]) {
-                                    println!("      ⚠️ Error al escribir archivo intermedio: {}", e);
-                                } else {
-                                    println!("      💾 Archivo actualizado por el agente.");
-                                }
-                            },
-                            Err(e) => {
-                                println!("      ⚠️ Intento de acceso denegado: {}", e);
+
+                        if is_mutation {
+                            match crate::files::secure_join(&agent_context.project_root, std::path::Path::new(path_str)) {
+                                Ok(safe_path) => {
+                                    // Tomamos el primer artefacto (el archivo principal)
+                                    let code = &result.artifacts[0];
+                                    if !code.is_empty() {
+                                        // --- SAFETY CHECKS ---
+                                        let original_content = std::fs::read_to_string(&safe_path).unwrap_or_default();
+                                        let original_size = original_content.len();
+                                        let new_size = code.len();
+                                        
+                                        // 1. Ratio Check (Summary detection)
+                                        if original_size > 500 && new_size < (original_size / 2) {
+                                            println!("\n      {} {}. El nuevo código es un {}% más pequeño.", 
+                                                "🚨 ADVERTENCIA:".red().bold(), 
+                                                "El cambio propuesto sugiere una pérdida masiva de código".on_red().white().bold(),
+                                                ((original_size - new_size) * 100 / original_size)
+                                            );
+                                            println!("      {} {}.", 
+                                                "⚠️ ".yellow(),
+                                                "Es muy probable que la IA esté devolviendo un RESUMEN en lugar del archivo completo".yellow()
+                                            );
+                                        }
+
+                                        // 2. Truncation Check (Abrupt end detection)
+                                        let is_potentially_truncated = code.matches('{').count() > code.matches('}').count() 
+                                            || code.matches('(').count() > code.matches(')').count()
+                                            || (!code.trim().ends_with('}') && !code.trim().ends_with(';') && !code.trim().ends_with(']') && code.len() > 1000);
+
+                                        if is_potentially_truncated {
+                                            println!("\n      {} {}", "☢️  PELIGRO:".on_red().white().bold(), "EL CÓDIGO PARECE ESTAR TRUNCADO (INCOMPLETO)".red().bold());
+                                            println!("      {} La respuesta de la IA se cortó antes de terminar. Aplicar esto BORRARÁ parte de tu archivo.", "⚠️".yellow());
+                                            println!("      {} Tip: Intenta con un archivo más pequeño o limpia el caché con `pro clean-cache`.", "💡".cyan());
+                                        }
+
+                                        println!("\n      {} El agente ha propuesto cambios para {}", "🛠️  Sugerencia:".yellow().bold(), path_str.cyan());
+                                        
+                                        let confirm = dialoguer::Confirm::new()
+                                            .with_prompt("      ¿Deseas aplicar estos cambios al archivo?")
+                                            .default(!is_potentially_truncated)
+                                            .interact()
+                                            .unwrap_or(false);
+
+                                        if confirm {
+                                            if let Err(e) = std::fs::write(&safe_path, code) {
+                                                println!("      ❌ Error al escribir archivo: {}", e);
+                                            } else {
+                                                println!("      💾 Código actualizado exitosamente.");
+                                            }
+                                        } else {
+                                            println!("      ⏭️  Cambios descartados por el usuario.");
+                                        }
+                                    } else {
+                                        println!("      ⚠️  El agente no proporcionó un bloque de código válido (```).");
+                                        println!("      📄 Respuesta completa del agente (para diagnóstico):\n{}\n", result.output.dimmed());
+                                    }
+                                },
+                                Err(e) => println!("      ⚠️  Acceso denegado: {}", e),
                             }
+                        } else if task.task_type == TaskType::Test {
+                            println!("      🧪 {} test(s) generado(s) para: {}", result.artifacts.len(), path_str.cyan());
+                            println!("      💡 Los tests en workflows se guardan en el historial de resultados.");
                         }
                     }
 
@@ -140,12 +189,12 @@ impl WorkflowEngine {
                 }
                 Err(e) => {
                     println!("      ❌ Paso fallido: {}", e);
-                    return Err(e);
+                    return Err(anyhow::anyhow!("Workflow interrumpido en paso '{}': {}", step.name, e));
                 }
             }
         }
 
-        println!("\n🏁 Workflow '{}' finalizado exitosamente.", workflow.name);
+        println!("\n🏁 Workflow '{}' finalizado exitosamente.", workflow.name.cyan());
         Ok(wf_context)
     }
 }

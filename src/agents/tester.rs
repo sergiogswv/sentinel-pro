@@ -64,7 +64,12 @@ impl Agent for TesterAgent {
     }
 
     async fn execute(&self, task: &Task, context: &AgentContext) -> anyhow::Result<TaskResult> {
-        println!("   🧪 TesterAgent: Procesando tarea '{}'...", task.description);
+        let file_hint = task.file_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "archivo".to_string());
+        println!("   🧪 TesterAgent: generando test para '{}'...", file_hint);
 
         let rag_context = if let Some(path) = &task.file_path {
             context.build_rag_context(path)

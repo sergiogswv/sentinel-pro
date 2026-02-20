@@ -49,9 +49,9 @@ pub fn consultar_ia_dinamico(
         task,
     );
 
-    // 4. Guardar en Caché si tuvo éxito
+    // 4. Guardar en Caché si tuvo éxito y parece una respuesta válida
     if let Ok(ref res) = resultado {
-        if config.use_cache {
+        if config.use_cache && res.trim().len() > 20 {
             let _ = guardar_en_cache(&prompt, res, project_path);
         }
     }

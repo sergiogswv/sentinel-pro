@@ -57,8 +57,14 @@ impl FixSuggesterAgent {
             1. NO generes lógica de negocio nueva si no es necesaria para corregir el problema.\n\
             2. Asegúrate de que el código propuesto sea production-ready y respete los estándares del framework.\n\
             3. Elimina código muerto o importaciones innecesarias si las detectas en el contexto.\n\
-            4. Devuelve el código corregido dentro de un bloque markdown (```).\n\
-            5. Mantén la lógica original intacta, enfocándote solo en resolver la vulnerabilidad o el fallo detectado.\n"
+            4. Si la mejora implica múltiples archivos, genera UN bloque ```lang separado por cada archivo.\n\
+            5. La PRIMERA LÍNEA de cada bloque de código DEBE ser un comentario con la ruta relativa del archivo:\n\
+               Ejemplo TypeScript: // src/domain/user/user.entity.ts\n\
+               Ejemplo Python:     # app/domain/user.py\n\
+            6. CRÍTICO: Debes envolver el código en bloques markdown (```) indicando el lenguaje.\n\
+            7. Debes devolver el archivo COMPLETO con las correcciones aplicadas. \n\
+               ESTÁ PROHIBIDO devolver solo resúmenes, snippets parciales o comentarios tipo \"// ... resto del código\".\n\
+            8. Mantén la lógica original intacta, enfocándote solo en la mejora solicitada.\n"
         );
 
         prompt
@@ -102,14 +108,19 @@ impl Agent for FixSuggesterAgent {
         })
         .await??;
 
-        let code = extraer_codigo(&response);
-        let success = !code.trim().is_empty();
+        let bloques = crate::ai::utils::extraer_todos_bloques(&response);
+        let success = !bloques.is_empty();
+        let artifacts = bloques.into_iter().map(|(_, code)| code).collect::<Vec<_>>();
+
+        if success {
+            println!("   ✅ {} bloque(s) de código extraídos.", artifacts.len());
+        }
 
         Ok(TaskResult {
             success,
             output: response,
             files_modified: vec![],
-            artifacts: vec![code],
+            artifacts,
         })
     }
 }

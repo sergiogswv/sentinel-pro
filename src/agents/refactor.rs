@@ -49,7 +49,8 @@ impl RefactorAgent {
             FORMATO DE RESPUESTA:\n\
             1. Breve análisis de los problemas encontrados.\n\
             2. Explicación de las mejoras aplicadas.\n\
-            3. BLOQUE DE CÓDIGO ÚNICO (```) con la versión refactorizada completa.\n"
+            3. BLOQUE DE CÓDIGO ÚNICO usando triple comilla (```) con la versión refactorizada COMPLETA Y FUNCIONAL.\n\
+               CRÍTICO: NO devuelvas resúmenes ni diffs parciales. El bloque debe contener el archivo enterito.\n"
         );
 
         prompt
@@ -97,14 +98,19 @@ impl Agent for RefactorAgent {
         })
         .await??;
 
-        let code = extraer_codigo(&response);
-        let success = !code.trim().is_empty();
+        let bloques = crate::ai::utils::extraer_todos_bloques(&response);
+        let success = !bloques.is_empty();
+        let artifacts = bloques.into_iter().map(|(_, code)| code).collect::<Vec<_>>();
+
+        if success {
+            println!("   ✅ {} bloque(s) de código extraídos.", artifacts.len());
+        }
 
         Ok(TaskResult {
             success,
             output: response,
             files_modified: vec![],
-            artifacts: vec![code],
+            artifacts,
         })
     }
 }

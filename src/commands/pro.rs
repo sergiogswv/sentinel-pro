@@ -605,15 +605,20 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
             }
         }
-        ProCommands::TestAll => {
-            let pb = ui::crear_progreso("Ejecutando asistente de pruebas...");
+         ProCommands::TestAll => {
+            let pb = ui::crear_progreso("Escaneando archivos sin cobertura de tests...");
 
-            // 1. Escaneo Inteligente de Archivos sin Test
-            let mut archivos_sin_test = Vec::new();
-            let src_path = agent_context.project_root.join("src"); // Asumimos convention src/
+            let framework = &agent_context.config.framework;
+
+            // Sufijos que NO necesitan tests para este framework
+            let sufijos_excluidos = crate::files::sufijos_sin_test_por_framework(framework);
+
+            // 1. Escaneo completo: busca archivos fuente sin test asociado
+            let mut archivos_sin_test: Vec<(String, std::path::PathBuf)> = Vec::new();
+            let mut archivos_filtrados_por_framework = 0usize;
+            let src_path = agent_context.project_root.join("src");
 
             if src_path.exists() {
-                // Buscar recursivamente
                 let walker = ignore::WalkBuilder::new(&src_path)
                     .hidden(false)
                     .git_ignore(true)
@@ -621,215 +626,430 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
                 for result in walker {
                     if let Ok(entry) = result {
-                        // ignore::DirEntry
-                        let entry: ignore::DirEntry = entry;
-                        let path = entry.path();
+                        let path = entry.into_path();
+                        if !path.is_file() { continue; }
 
-                        // Verificar si es archivo
-                        if !path.is_file() {
-                            continue;
-                        }
+                        let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
 
-                        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+                        // Solo extensiones configuradas
+                        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_string();
+                        if !agent_context.config.file_extensions.contains(&ext) { continue; }
 
-                        // Filtrar por extensiones configuradas
-                        let ext_opt = path.extension().and_then(|e| e.to_str());
-                        let ext = ext_opt.unwrap_or("").to_string();
-                        if !agent_context.config.file_extensions.contains(&ext) {
-                            continue;
-                        }
-
-                        // Ignorar archivos de test existentes
+                        // Ignorar archivos que ya son tests
                         if file_name.ends_with(".spec.ts")
                             || file_name.ends_with(".test.ts")
-                            || file_name.ends_with("_test.go")
+                            || file_name.ends_with(".spec.js")
                             || file_name.ends_with(".test.js")
+                            || file_name.ends_with(".spec.tsx")
+                            || file_name.ends_with(".test.tsx")
+                            || file_name.ends_with("_test.go")
+                            || file_name.ends_with("_test.py")
+                            || file_name.ends_with("Test.php")
                         {
                             continue;
                         }
 
-                        // Verificar si tiene test
-                        let base_name = file_name
-                            .split('.')
-                            .next()
-                            .unwrap_or(&file_name)
-                            .to_string();
+                        // Ignorar index/main/mod
+                        if file_name == "index.ts" || file_name == "index.js"
+                            || file_name == "main.ts" || file_name == "main.js"
+                            || file_name == "mod.rs" || file_name == "main.rs"
+                        {
+                            continue;
+                        }
 
-                        let test_exists = crate::files::buscar_archivo_test(
+                        // ─── Filtro inteligente por framework ───────────────
+                        if sufijos_excluidos.iter().any(|s| file_name.ends_with(s)) {
+                            archivos_filtrados_por_framework += 1;
+                            continue;
+                        }
+
+                        let base_name = file_name.split('.').next().unwrap_or(&file_name).to_string();
+
+                        // Check 1: patrones configurados del framework
+                        let by_pattern = crate::files::buscar_archivo_test(
                             &base_name,
                             &agent_context.project_root,
                             &agent_context.config.test_patterns,
-                        )
-                        .is_some();
+                        ).is_some();
 
-                        if !test_exists {
-                            if let Ok(rel) = path.strip_prefix(&agent_context.project_root) {
-                                archivos_sin_test.push(rel.display().to_string());
-                            } else {
-                                archivos_sin_test.push(path.display().to_string());
-                            }
+                        // Check 2: búsqueda recursiva en test/ tests/ __tests__
+                        let by_dir = if !by_pattern {
+                            crate::files::buscar_test_en_directorios(&base_name, &agent_context.project_root)
+                        } else { false };
+
+                        if !by_pattern && !by_dir {
+                            let rel = path.strip_prefix(&agent_context.project_root)
+                                .map(|r| r.display().to_string())
+                                .unwrap_or_else(|_| path.display().to_string());
+                            archivos_sin_test.push((rel, path.clone()));
                         }
                     }
                 }
             }
 
-            // Limitar la lista para no exceder tokens
-            let total_missing = archivos_sin_test.len();
-            archivos_sin_test.truncate(20);
+            pb.finish_and_clear();
 
-            let context_msg = if archivos_sin_test.is_empty() {
-                "No se detectaron archivos fuente obvios sin tests en src/ (o el proyecto tiene una estructura diferente).".to_string()
+            // Informar del framework detectado y filtrado
+            println!("\n{} {}", "🔍 Framework detectado:".dimmed(), framework.cyan().bold());
+            if archivos_filtrados_por_framework > 0 {
+                println!(
+                    "{}",
+                    format!(
+                        "   ℹ️  {} archivo(s) omitidos automáticamente ({}): no requieren tests unitarios en {}",
+                        archivos_filtrados_por_framework,
+                        sufijos_excluidos.join(", "),
+                        framework
+                    ).dimmed()
+                );
+            }
+            println!();
+
+            // 2. Mostrar resumen
+            if archivos_sin_test.is_empty() {
+                println!("\n{}", "✅ ¡Todos los archivos fuente tienen cobertura de tests!".green().bold());
             } else {
-                format!(
-                    "Se detectaron {} archivos que NO parecen tener tests asociados.\nLista de prioridad (Top 20):\n- {}",
-                    total_missing,
-                    archivos_sin_test.join("\n- ")
-                )
-            };
+                println!("\n{}", format!("🧪 {} archivos sin cobertura de tests detectados:", archivos_sin_test.len()).bold().yellow());
 
-            let task = Task {
-                id: uuid::Uuid::new_v4().to_string(),
-                description: "Analiza el proyecto y genera pruebas unitarias para los archivos que no tienen cobertura. \
-                              IMPORTANTE 1: Todos los tests generados deben apuntar obligatoriamente a la carpeta raíz `test/` (o su equivalente), NO dentro de root/src. \
-                              IMPORTANTE 2: Para cada archivo generado, envuelve el código en un bloque markdown y la PRIMERA LÍNEA del código DEBE ser un comentario con la ruta de destino. \
-                              Ejemplo: // test/components/auth.spec.ts".to_string(),
-                task_type: TaskType::Test,
-                file_path: None,
-                context: Some(context_msg),
-            };
+                // --- Agrupar por sufijo de archivo ---
+                // Detectar el tipo compuesto: .service.ts, .controller.ts, etc.
+                // Si no hay sufijo compuesto conocido, agrupar como "otros"
+                fn detectar_grupo(nombre: &str) -> String {
+                    // Sufijos compuestos (más específicos primero)
+                    let sufijos = [
+                        ".service.ts", ".controller.ts", ".repository.ts", ".module.ts",
+                        ".guard.ts", ".middleware.ts", ".interceptor.ts", ".decorator.ts",
+                        ".dto.ts", ".entity.ts", ".schema.ts", ".model.ts",
+                        ".helper.ts", ".util.ts", ".utils.ts", ".pipe.ts",
+                        ".service.js", ".controller.js", ".repository.js",
+                        ".service.py", ".views.py", ".models.py", ".serializers.py",
+                        ".service.php", ".controller.php",
+                        ".rs", ".go", ".java", ".kt",
+                    ];
+                    for s in &sufijos {
+                        if nombre.ends_with(s) {
+                            return s.trim_start_matches('.').to_string();
+                        }
+                    }
+                    // Fallback: extensión simple
+                    let ext = nombre.rsplit('.').next().unwrap_or("otros");
+                    format!("*.{}", ext)
+                }
 
-            let result =
-                rt.block_on(orchestrator.execute_task("TesterAgent", &task, &agent_context));
-            pb.finish_with_message("🧪 Asistente de Pruebas finalizado.");
+                // Construir grupos: BTreeMap preserva orden alfabético
+                let mut grupos: std::collections::BTreeMap<String, Vec<(String, std::path::PathBuf)>> = std::collections::BTreeMap::new();
+                for (ruta, abs) in &archivos_sin_test {
+                    let nombre = std::path::Path::new(ruta)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let grupo = detectar_grupo(&nombre);
+                    grupos.entry(grupo).or_default().push((ruta.clone(), abs.clone()));
+                }
 
-            match result {
-                Ok(res) => {
-                    println!("{}", "🧪 PLAN DE PRUEBAS GENERADO".bold().green());
-                    // Mostrar artifacts (código extraído)
-                    for artifact in &res.artifacts {
-                        println!("\n{}\n", artifact);
+                // Mostrar listado agrupado
+                for (grupo, archivos) in &grupos {
+                    println!("\n  {} {} {} {}", "▸".cyan(), grupo.bold(), format!("({} archivos)", archivos.len()).dimmed(), "");
+                    for (ruta, _) in archivos {
+                        println!("      {}", ruta.dimmed());
+                    }
+                }
+                println!();
+
+                // Opciones de modo por grupo
+                let modo_opciones = ["⚡ Automático", "🎯 Manual", "⏭️  Omitir grupo"];
+
+                let mut generados = 0usize;
+                let mut omitidos = 0usize;
+
+                for (grupo, archivos) in &grupos {
+                    println!("{}", format!("── {} ({} archivos) ──", grupo, archivos.len()).bold().cyan());
+
+                    let modo_idx = Select::with_theme(&ColorfulTheme::default())
+                        .with_prompt("Modo para este grupo")
+                        .items(&modo_opciones)
+                        .default(0)
+                        .interact()
+                        .unwrap_or(2); // default seguro: omitir
+
+                    if modo_idx == 2 {
+                        println!("   ⏭️  Grupo omitido.\n");
+                        omitidos += archivos.len();
+                        continue;
                     }
 
-                    println!("{}", "\n📝 Detalles:".bold());
-                    println!("{}", res.output);
+                    let modo_auto = modo_idx == 0;
 
-                    let ok = dialoguer::Confirm::new()
-                        .with_prompt("¿Deseas guardar automáticamente los tests generados en tu proyecto?")
+                    for (i, (ruta, abs_path)) in archivos.iter().enumerate() {
+                        if !modo_auto {
+                            println!("  [{}/{}] {}", (i + 1).to_string().yellow(), archivos.len(), ruta.cyan().bold());
+                            let generar = dialoguer::Confirm::new()
+                                .with_prompt("¿Generar test?")
+                                .default(true)
+                                .interact()
+                                .unwrap_or(false);
+
+                            if !generar {
+                                println!("     ⏭️  Omitido.\n");
+                                omitidos += 1;
+                                continue;
+                            }
+                        } else {
+                            println!("  [{}/{}] {}", (i + 1).to_string().yellow(), archivos.len(), ruta.cyan());
+                        }
+
+                        // Leer contenido (máx 120 líneas)
+                        let contenido = std::fs::read_to_string(abs_path)
+                            .unwrap_or_default()
+                            .lines()
+                            .take(120)
+                            .collect::<Vec<_>>()
+                            .join("\n");
+
+                        let pb_gen = ui::crear_progreso("Generando test...");
+
+                        let task = Task {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            description: format!(
+                                "Genera UNA prueba unitaria para el siguiente archivo.\n\
+                                REGLAS:\n\
+                                1. Genera UN ÚNICO bloque de código.\n\
+                                2. La PRIMERA LÍNEA debe ser un comentario con la ruta de destino. Ejemplo:\n\
+                                   // test/shared/domain/entity.base.spec.ts\n\
+                                3. Cubre happy path y edge cases basándote en el código real.\n\
+                                4. Usa mocks para dependencias externas.\n\
+                                5. No incluyas explicaciones fuera del bloque de código.\n\n\
+                                Archivo fuente: {}\n\
+                                ```\n{}\n```",
+                                ruta, contenido
+                            ),
+                            task_type: TaskType::Test,
+                            file_path: Some(abs_path.clone()),
+                            context: None,
+                        };
+
+                        let result = rt.block_on(orchestrator.execute_task("TesterAgent", &task, &agent_context));
+                        pb_gen.finish_and_clear();
+
+                        match result {
+                            Ok(res) => {
+                                let bloques = crate::ai::utils::extraer_todos_bloques(&res.output);
+
+                                if bloques.is_empty() {
+                                    println!("     ⚠️  El AI no generó bloques de código válidos (```).");
+                                    println!("     📄 Respuesta completa del AI:\n---\n{}\n---\n", res.output.dimmed());
+                                    if res.output.trim().is_empty() {
+                                        println!("     💡 Tip: La respuesta está vacía. Si persiste, intenta limpiar el caché con `pro clean-cache`.\n");
+                                    }
+                                    continue;
+                                }
+
+                                let mut guardado = false;
+                                for (path_opt, codigo) in &bloques {
+                                    if let Some(dest_rel) = path_opt {
+                                        let dest = agent_context.project_root.join(dest_rel);
+
+                                        if dest.is_dir() {
+                                            println!("     ⚠️  Ruta es directorio, omitido: {}", dest_rel.yellow());
+                                            continue;
+                                        }
+
+                                        if let Some(parent) = dest.parent() {
+                                            let _ = std::fs::create_dir_all(parent);
+                                        }
+
+                                        match std::fs::write(&dest, codigo) {
+                                            Ok(_) => {
+                                                println!("     ✅ {}", dest_rel.green());
+                                                guardado = true;
+                                                generados += 1;
+                                                let mut s = agent_context.stats.lock().unwrap();
+                                                s.total_analisis += 1;
+                                                s.guardar(&agent_context.project_root);
+                                            }
+                                            Err(e) => println!("     ❌ Error al guardar '{}': {}", dest_rel, e),
+                                        }
+                                    } else {
+                                        println!("     ⚠️  Sin ruta de destino (primera línea debe ser // test/ruta/archivo.spec.ts)");
+                                    }
+                                }
+                                if !guardado {
+                                    println!("     ℹ️  No se guardó el test.");
+                                }
+                                println!();
+                            }
+                            Err(e) => println!("     ❌ Error: {}\n", e),
+                        }
+                    }
+                    println!();
+                }
+
+                // Resumen final
+                println!("{}", "─".repeat(60).dimmed());
+                println!("{}", format!("🧪 Tests generados: {}  |  Omitidos: {}", generados, omitidos).bold());
+                if generados > 0 {
+                    let run_tests = dialoguer::Confirm::new()
+                        .with_prompt("¿Deseas ejecutar los tests ahora?")
                         .default(false)
                         .interact()
                         .unwrap_or(false);
 
-                    if ok {
-                        let mut saved = 0;
-                        let mut current_block = String::new();
-                        let mut in_block = false;
+                    if run_tests {
+                        let test_cmd = &agent_context.config.test_command;
+                        let pb_run = ui::crear_progreso(&format!("Ejecutando: {}", test_cmd));
+                        let mut parts = test_cmd.split_whitespace();
+                        if let Some(prog) = parts.next() {
+                            let args: Vec<&str> = parts.collect();
+                            let out = std::process::Command::new(prog)
+                                .args(&args)
+                                .current_dir(&agent_context.project_root)
+                                .output();
+                            pb_run.finish_and_clear();
 
-                        for line in res.output.lines() {
-                            if line.starts_with("```") {
-                                if in_block {
-                                    // procesar bloque
-                                    let mut lines = current_block.lines();
-                                    if let Some(first_line) = lines.next() {
-                                        let trimmed = first_line.trim();
-                                        if trimmed.starts_with("//") || trimmed.starts_with("#") {
-                                            let path_str = trimmed
-                                                .trim_start_matches(|c| c == '/' || c == '#' || c == ' ')
-                                                .to_string();
-                                                
-                                            if path_str.contains('.') {
-                                                let target = agent_context.project_root.join(&path_str);
-                                                if let Some(parent) = target.parent() {
-                                                    let _ = std::fs::create_dir_all(parent);
-                                                }
-                                                if let Ok(_) = std::fs::write(&target, &current_block) {
-                                                    println!("   💾 Test guardado: {}", path_str.cyan());
-                                                    saved += 1;
+                            match out {
+                                Ok(o) => {
+                                    // Unir stdout + stderr para parsear
+                                    let combined = format!(
+                                        "{}\n{}",
+                                        String::from_utf8_lossy(&o.stdout),
+                                        String::from_utf8_lossy(&o.stderr)
+                                    );
+
+                                    // ── Parser de resumen de tests ─────────────────
+                                    // Soporta Jest/Vitest: "Tests: 3 failed, 5 passed, 8 total"
+                                    // También: "Test Suites: 2 failed, 3 passed, 5 total"
+                                    let mut n_passed = 0usize;
+                                    let mut n_failed = 0usize;
+                                    let mut n_skipped = 0usize;
+                                    let mut suites_fallidas: Vec<String> = Vec::new();
+
+                                    for line in combined.lines() {
+                                        let l = line.trim();
+
+                                        // Línea de resumen: "Tests: 3 failed, 5 passed, 8 total"
+                                        if (l.starts_with("Tests:") || l.starts_with("Test Results")) && l.contains("total") {
+                                            for part in l.split(',') {
+                                                let p = part.trim();
+                                                if let Some(n) = p.split_whitespace().next().and_then(|n| n.parse::<usize>().ok()) {
+                                                    if p.contains("failed") { n_failed = n; }
+                                                    else if p.contains("passed") { n_passed = n; }
+                                                    else if p.contains("skipped") || p.contains("pending") { n_skipped = n; }
                                                 }
                                             }
                                         }
-                                    }
-                                    current_block.clear();
-                                    in_block = false;
-                                } else {
-                                    in_block = true;
-                                }
-                            } else if in_block {
-                                current_block.push_str(line);
-                                current_block.push('\n');
-                            }
-                        }
 
-                        if saved > 0 {
-                            println!("{}", format!("✅ {} archivos de prueba guardados.", saved).green());
-
-                            // NUEVO: Preguntar para ejecutar tests y auto-fix
-                            let run_tests = dialoguer::Confirm::new()
-                                .with_prompt("¿Deseas ejecutar los tests ahora y solucionar problemas si fallan?")
-                                .default(false)
-                                .interact()
-                                .unwrap_or(false);
-
-                            if run_tests {
-                                let ref test_cmd = agent_context.config.test_command;
-                                println!("🚀 Ejecutando tests: {}", test_cmd.cyan());
-
-                                let mut cmd_parts = test_cmd.split_whitespace();
-                                if let Some(program) = cmd_parts.next() {
-                                    let args: Vec<&str> = cmd_parts.collect();
-                                    
-                                    let output_result = std::process::Command::new(program)
-                                        .args(&args)
-                                        .current_dir(&agent_context.project_root)
-                                        .output();
-
-                                    match output_result {
-                                        Ok(out) => {
-                                            if out.status.success() {
-                                                println!("{}", "✅ Todos los tests pasaron exitosamente.".green());
-                                            } else {
-                                                let error_output = String::from_utf8_lossy(&out.stderr).to_string() 
-                                                    + &String::from_utf8_lossy(&out.stdout).to_string();
-                                                    
-                                                println!("{}", "❌ Algunos tests fallaron. Intentando auto-arreglar...".red());
-                                                
-                                                let pb_fix = ui::crear_progreso("Diagnosticando el fallo con AI...");
-                                                let fix_task = Task {
-                                                    id: uuid::Uuid::new_v4().to_string(),
-                                                    description: format!(
-                                                        "Acabamos de generar y ejecutar tests, pero fallaron con esta salida:\n\n{}\n\nRevisa el error, encuentra el fallo lógico y proporciona SOLO el código corregido.", 
-                                                        error_output
-                                                    ),
-                                                    task_type: TaskType::Fix,
-                                                    file_path: None,
-                                                    context: Some(error_output),
-                                                };
-
-                                                let fix_result = rt.block_on(orchestrator.execute_task("FixSuggesterAgent", &fix_task, &agent_context));
-                                                pb_fix.finish_and_clear();
-
-                                                match fix_result {
-                                                    Ok(f_res) => {
-                                                        println!("{}", "🩹 SUGERENCIAS DE CORRECCIÓN".bold().green());
-                                                        println!("{}", f_res.output);
-                                                    },
-                                                    Err(e) => println!("{} {}", "❌ Error al intentar aplicar fix:".red(), e),
+                                        // pytest: "5 passed, 2 failed, 1 warning in 3.14s"
+                                        if l.contains("passed") && l.contains("failed") && l.contains("in ") {
+                                            for part in l.split(',') {
+                                                let p = part.trim();
+                                                if let Some(n) = p.split_whitespace().next().and_then(|n| n.parse::<usize>().ok()) {
+                                                    if p.contains("failed") { n_failed = n; }
+                                                    else if p.contains("passed") { n_passed = n; }
+                                                    else if p.contains("skip") { n_skipped = n; }
                                                 }
                                             }
-                                        },
-                                        Err(e) => println!("{} {}", "❌ Error del sistema al intentar ejecutar tests:".red(), e),
+                                        }
+
+                                        // Jest: líneas con "FAIL src/..." indican suites fallidas
+                                        if l.starts_with("FAIL ") {
+                                            suites_fallidas.push(l.trim_start_matches("FAIL ").to_string());
+                                        }
+                                        // Vitest: "❯ FAIL src/..."
+                                        if l.contains("FAIL") && (l.contains("src/") || l.contains("test/")) {
+                                            let suite = l.split("FAIL").last().unwrap_or("").trim().to_string();
+                                            if !suite.is_empty() && !suites_fallidas.contains(&suite) {
+                                                suites_fallidas.push(suite);
+                                            }
+                                        }
+                                    }
+
+                                    // ── Mostrar resumen limpio ─────────────────────
+                                    println!("\n{}", "📊 Resultados de tests:".bold());
+                                    println!("   ✅ Pasaron:  {}", n_passed.to_string().green().bold());
+                                    if n_failed > 0 {
+                                        println!("   ❌ Fallaron: {}", n_failed.to_string().red().bold());
+                                    }
+                                    if n_skipped > 0 {
+                                        println!("   ⏭️  Omitidos: {}", n_skipped.to_string().yellow());
+                                    }
+
+                                    if !suites_fallidas.is_empty() {
+                                        println!("\n{}", "   Suites con fallos:".red().bold());
+                                        for s in &suites_fallidas {
+                                            println!("      • {}", s.red());
+                                        }
+                                    }
+
+                                    if o.status.success() || n_failed == 0 {
+                                        println!("\n{}", "✅ Todos los tests pasaron correctamente.".green().bold());
+                                    } else {
+                                        println!();
+                                        // ── Ofrecer auto-fix ──────────────────────
+                                        let fix = dialoguer::Confirm::new()
+                                            .with_prompt("¿Intentar arreglar los tests fallidos con AI?")
+                                            .default(true)
+                                            .interact()
+                                            .unwrap_or(false);
+
+                                        if fix {
+                                            let error_ctx = format!(
+                                                "Tests fallidos: {}\nSuites con error:\n{}\n\nOutput completo:\n{}",
+                                                n_failed,
+                                                suites_fallidas.join("\n"),
+                                                // Solo las primeras 60 líneas del output para no saturar
+                                                combined.lines().take(60).collect::<Vec<_>>().join("\n")
+                                            );
+
+                                            let pb_fix = ui::crear_progreso("Analizando fallos con AI...");
+                                            let fix_task = Task {
+                                                id: uuid::Uuid::new_v4().to_string(),
+                                                description: format!(
+                                                    "Los siguientes tests fallaron. Analiza el error y proporciona SOLO \
+                                                    el código corregido (sin explicaciones).\n\n{}",
+                                                    error_ctx
+                                                ),
+                                                task_type: TaskType::Fix,
+                                                file_path: None,
+                                                context: Some(error_ctx),
+                                            };
+
+                                            let fix_result = rt.block_on(
+                                                orchestrator.execute_task("FixSuggesterAgent", &fix_task, &agent_context)
+                                            );
+                                            pb_fix.finish_and_clear();
+
+                                            match fix_result {
+                                                Ok(f) => {
+                                                    println!("{}", "🩹 Correcciones sugeridas:".bold().green());
+                                                    // Aplicar bloques si tienen ruta, sino solo informar
+                                                    let bloques = crate::ai::utils::extraer_todos_bloques(&f.output);
+                                                    if bloques.is_empty() {
+                                                        println!("{}", f.output.lines().take(30).collect::<Vec<_>>().join("\n"));
+                                                    } else {
+                                                        for (path_opt, codigo) in &bloques {
+                                                            if let Some(dest_rel) = path_opt {
+                                                                let dest = agent_context.project_root.join(dest_rel);
+                                                                if let Some(p) = dest.parent() { let _ = std::fs::create_dir_all(p); }
+                                                                match std::fs::write(&dest, codigo) {
+                                                                    Ok(_) => println!("   ✅ Corregido: {}", dest_rel.green()),
+                                                                    Err(e) => println!("   ❌ No se pudo guardar '{}': {}", dest_rel, e),
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => println!("❌ Error al generar fix: {}", e),
+                                            }
+                                        }
                                     }
                                 }
+                                Err(e) => println!("❌ Error ejecutando tests: {}", e),
                             }
-                        } else {
-                            println!("{}", "⚠️ No se pudo extraer automáticamente las rutas. Recuerda que la IA debe poner el nombre del archivo como comentario en la primera línea.".yellow());
                         }
                     }
                 }
-                Err(e) => {
-                    println!("{} {}", "❌ Error al generar tests:".bold().red(), e);
-                }
             }
         }
+
         ProCommands::Ml { subcommand } => match subcommand {
             crate::commands::MlCommands::Download => {
                 let start = std::time::Instant::now();
@@ -1011,9 +1231,10 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                               3. Identifica cuellos de botella o deuda técnica.\n\n\
                               INSTRUCCIONES DE SALIDA:\n\
                               - Primero escribe tu análisis detallado en lenguaje humano.\n\
-                              - AL FINAL DE TODO, añade un bloque de código JSON con sugerencias que el usuario pueda seleccionar para desarrollar.\n\
+                              - AL FINAL DE TODO, añade OBLIGATORIAMENTE un bloque ```json con un ARRAY de sugerencias.\n\
+                              - IMPORTANTE: El JSON DEBE ser un array [...], NUNCA un objeto {} suelto.\n\
                               - NO incluyas explicaciones dentro del bloque JSON.\n\n\
-                              ESTRUCTURA DEL JSON (Obligatorio):\n\
+                              ESTRUCTURA DEL JSON (Obligatorio, siempre array):\n\
                               ```json\n\
                               [\n\
                                 {\n\
@@ -1050,8 +1271,17 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     println!("{}", report_only);
 
                     // 3. Extraer y procesar sugerencias JSON
-                    let json_str = crate::ai::utils::extraer_json(&res.output);
-                    if let Ok(mut suggestions) = serde_json::from_str::<Vec<ReviewSuggestion>>(&json_str) {
+                    // Usar extractor semántico que valida campos de ReviewSuggestion
+                    // y evita falsos positivos (package.json, arrays de strings, etc.)
+                    let raw_json = crate::ai::utils::extraer_json_sugerencias(&res.output);
+                    let json_str = if raw_json.trim_start().starts_with('{') {
+                        // Objeto suelto → envolver en array
+                        format!("[{}]", raw_json)
+                    } else {
+                        raw_json
+                    };
+                    match serde_json::from_str::<Vec<ReviewSuggestion>>(&json_str) {
+                        Ok(mut suggestions) if !suggestions.is_empty() => {
                          while !suggestions.is_empty() {
                             println!("\n💡 {} sugerencias de mejora detectadas.", suggestions.len().to_string().cyan());
                             
@@ -1099,48 +1329,68 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                                     match dev_result {
                                         Ok(d_res) => {
                                             println!("{}", "\n✨ MEJORA GENERADA".bold().green());
-                                            
-                                            if let Some(code) = d_res.artifacts.first() {
-                                                if !code.trim().is_empty() {
-                                                    println!("\n{}", code);
-                                                    
-                                                    let apply = dialoguer::Confirm::new()
-                                                        .with_prompt("¿Deseas aplicar estos cambios automáticamente?")
-                                                        .default(true)
-                                                        .interact()
-                                                        .unwrap_or(false);
-                                                        
-                                                    if apply {
-                                                        if let Some(file_path_str) = suggestion.files_involved.first() {
-                                                            let file_path = agent_context.project_root.join(file_path_str);
-                                                            if let Some(parent) = file_path.parent() {
-                                                                let _ = std::fs::create_dir_all(parent);
+
+                                            // Extraer TODOS los bloques de código (soporte multi-archivo)
+                                            let bloques = crate::ai::utils::extraer_todos_bloques(&d_res.output);
+
+                                            if bloques.is_empty() {
+                                                println!("{}", d_res.output);
+                                            } else {
+                                                println!("\n📂 {} archivo(s) a generar/modificar:", bloques.len().to_string().cyan());
+                                                for (path_opt, _) in &bloques {
+                                                    match path_opt {
+                                                        Some(p) => println!("   • {}", p.cyan()),
+                                                        None => println!("   • (sin ruta — se mostrará en consola)"),
+                                                    }
+                                                }
+
+                                                let apply = dialoguer::Confirm::new()
+                                                    .with_prompt("¿Deseas aplicar estos cambios automáticamente?")
+                                                    .default(true)
+                                                    .interact()
+                                                    .unwrap_or(false);
+
+                                                if apply {
+                                                    let mut saved = 0;
+                                                    for (path_opt, code) in &bloques {
+                                                        match path_opt {
+                                                            Some(rel_path) => {
+                                                                let target = agent_context.project_root.join(rel_path);
+
+                                                                // Seguridad: rechazar si apunta a un directorio
+                                                                if target.is_dir() {
+                                                                    println!("   ⚠️  '{}' es un directorio, omitido. El AI debe especificar un archivo completo.", rel_path.yellow());
+                                                                    continue;
+                                                                }
+
+                                                                if let Some(parent) = target.parent() {
+                                                                    let _ = std::fs::create_dir_all(parent);
+                                                                }
+
+                                                                match std::fs::write(&target, code) {
+                                                                    Ok(_) => {
+                                                                        println!("   ✅ {}", rel_path.green());
+                                                                        saved += 1;
+                                                                    }
+                                                                    Err(e) => println!("   ❌ '{}': {}", rel_path, e),
+                                                                }
                                                             }
-                                                            
-                                                            if let Err(e) = std::fs::write(&file_path, code) {
-                                                                println!("   ❌ Error al guardar en {}: {}", file_path.display(), e);
-                                                            } else {
-                                                                println!("   ✅ Cambios aplicados con éxito en {}.", file_path_str.green());
-                                                                
-                                                                let mut s = agent_context.stats.lock().unwrap();
-                                                                s.sugerencias_aplicadas += 1;
-                                                                s.tiempo_estimado_ahorrado_mins += 30;
-                                                                s.guardar(&agent_context.project_root);
-                                                                
-                                                                // ELIMINAR LA SUGERENCIA YA APLICADA
-                                                                suggestions.remove(idx);
+                                                            None => {
+                                                                println!("\n{}", "[Código sin ruta — cópialo manualmente:]".yellow());
+                                                                println!("{}", code);
                                                             }
-                                                        } else {
-                                                            println!("   ⚠️ No se especificó un archivo de destino en la sugerencia. Por favor, aplica los cambios manualmente.");
-                                                            // Aun así la quitamos para no repetir el prompt si el usuario no puede hacer nada
-                                                            suggestions.remove(idx);
                                                         }
                                                     }
-                                                } else {
-                                                    println!("{}", d_res.output);
+
+                                                    if saved > 0 {
+                                                        let mut s = agent_context.stats.lock().unwrap();
+                                                        s.sugerencias_aplicadas += 1;
+                                                        s.tiempo_estimado_ahorrado_mins += 30;
+                                                        s.guardar(&agent_context.project_root);
+                                                        suggestions.remove(idx);
+                                                        println!("\n✅ {} archivo(s) guardados.", saved.to_string().green());
+                                                    }
                                                 }
-                                            } else {
-                                                println!("{}", d_res.output);
                                             }
                                         },
                                         Err(e) => println!("{} {}", "\n❌ Error al desarrollar la sugerencia:".red(), e),
@@ -1152,8 +1402,21 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                          if suggestions.is_empty() {
                              println!("\n✨ {} Todas las sugerencias han sido procesadas o aplicadas.", "Review completado:".green());
                          }
-                    } else {
-                        println!("\n{} No se pudo procesar el bloque de sugerencias inteligentes.", "⚠️".yellow());
+                        }
+                        Ok(_) => {
+                            // Array vacío: el AI no generó sugerencias pero el input fue correcto
+                            println!("\n{} El análisis no generó sugerencias de mejora concretas.", "ℹ️".cyan());
+                        }
+                        Err(parse_err) => {
+                            println!("\n{} No se pudieron parsear las sugerencias como JSON estructurado.", "⚠️".yellow());
+                            println!("   Detalle: {}", parse_err);
+                            println!("   Fragmento extraído:\n---");
+                            // Mostrar solo los primeros 300 chars para no inundar la terminal
+                            let preview = if json_str.len() > 300 { &json_str[..300] } else { &json_str };
+                            println!("{}", preview);
+                            println!("---");
+                            println!("   Tip: El AI debe responder con un bloque ```json [ ... ] ``` con objetos que tengan los campos: title, description, impact, action_item, files_involved.");
+                        }
                     }
                 }
                 Err(e) => {

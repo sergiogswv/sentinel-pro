@@ -31,11 +31,6 @@ impl AgentOrchestrator {
         context: &AgentContext,
     ) -> anyhow::Result<TaskResult> {
         if let Some(agent) = self.get_agent(agent_name) {
-            let summary = task.description.lines().next().unwrap_or("");
-            println!(
-                "   🚀 Ejecutando: {} (Agente: {})",
-                summary, agent_name
-            );
             agent.execute(task, context).await
         } else {
             Err(anyhow!("Agente '{}' no encontrado", agent_name))

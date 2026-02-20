@@ -193,6 +193,118 @@ pub fn buscar_archivo_test(
     None
 }
 
+/// Devuelve los sufijos de archivo que NO requieren tests unitarios en el framework dado.
+/// Basado en convenciones reales de cada framework y comunidad.
+pub fn sufijos_sin_test_por_framework(framework: &str) -> Vec<&'static str> {
+    let fw = framework.to_lowercase();
+
+    if fw.contains("nest") {
+        // NestJS: módulos, entidades, DTOs, interfaces, enums, constantes no necesitan tests
+        vec![
+            ".module.ts",
+            ".entity.ts",
+            ".dto.ts",
+            ".interface.ts",
+            ".types.ts",
+            ".type.ts",
+            ".enum.ts",
+            ".constants.ts",
+            ".constant.ts",
+            ".config.ts",
+            ".exception.ts",
+            ".error.ts",
+            ".decorator.ts",  // decoradores simples raramente se testean
+            ".schema.ts",     // Mongoose schemas
+        ]
+    } else if fw.contains("django") {
+        vec![
+            "apps.py",
+            "admin.py",
+            "settings.py",
+            "urls.py",
+            "wsgi.py",
+            "asgi.py",
+            "__init__.py",
+        ]
+    } else if fw.contains("laravel") || fw.contains("symfony") {
+        vec![
+            "ServiceProvider.php",
+            "Kernel.php",
+            "Handler.php",
+            "Console.php",
+        ]
+    } else if fw.contains("spring") {
+        vec![
+            "Application.java",
+            "Application.kt",
+            "Config.java",
+            "Config.kt",
+        ]
+    } else if fw.contains("express") || fw.contains("fastify") || fw.contains("koa") {
+        vec![
+            ".config.js",
+            ".config.ts",
+            ".constants.js",
+            ".constants.ts",
+            ".types.ts",
+        ]
+    } else if fw.contains("rails") || fw.contains("ruby") {
+        vec![
+            "schema.rb",
+            "seeds.rb",
+            "routes.rb",
+        ]
+    } else {
+        vec![]
+    }
+}
+
+/// Búsqueda ampliada: busca cualquier archivo de test en `test/` o `tests/`
+/// cuyo nombre de archivo contenga `base_name`.
+/// Útil como fallback cuando los tests generados no siguen los `test_patterns` del config.
+pub fn buscar_test_en_directorios(base_name: &str, project_path: &Path) -> bool {
+    let dirs_a_revisar = ["test", "tests", "__tests__", "spec"];
+    let extensiones_test = [".spec.ts", ".test.ts", ".spec.js", ".test.js",
+                            ".spec.tsx", ".test.tsx", "_test.go", "_test.py",
+                            "Test.php", ".spec.py"];
+
+    for dir_name in &dirs_a_revisar {
+        let test_dir = project_path.join(dir_name);
+        if !test_dir.exists() { continue; }
+
+        let walker = match std::fs::read_dir(&test_dir) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        // Búsqueda recursiva simple
+        if buscar_en_dir_recursivo(base_name, &test_dir, &extensiones_test) {
+            return true;
+        }
+    }
+    false
+}
+
+fn buscar_en_dir_recursivo(base_name: &str, dir: &Path, extensiones: &[&str]) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false; };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if buscar_en_dir_recursivo(base_name, &path, extensiones) {
+                return true;
+            }
+        } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            let name_lower = name.to_lowercase();
+            let base_lower = base_name.to_lowercase();
+            let has_ext = extensiones.iter().any(|e| name_lower.ends_with(e));
+            if has_ext && name_lower.contains(&base_lower) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Lee las dependencias del proyecto desde package.json o Cargo.toml
 ///
 /// # Argumentos
