@@ -39,21 +39,24 @@ impl ProjectIndexBuilder {
         let hash = self.calculate_hash(&content);
         let rel_path = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
 
-        // Check if already indexed and hash matches
-        let conn = self.db.lock();
-        let mut stmt = conn.prepare("SELECT content_hash FROM file_index WHERE file_path = ?")?;
-        let existing_hash: Option<String> = stmt.query_row(params![rel_path], |row| row.get(0)).ok();
+        // Fase 1: verificar hash y limpiar datos anteriores.
+        // El bloque { } suelta el MutexGuard antes de llamar a parse_and_fill,
+        // que necesita adquirir el mismo mutex (evita deadlock).
+        {
+            let conn = self.db.lock();
+            let mut stmt = conn.prepare("SELECT content_hash FROM file_index WHERE file_path = ?")?;
+            let existing_hash: Option<String> = stmt.query_row(params![rel_path], |row| row.get(0)).ok();
 
-        if existing_hash == Some(hash.clone()) {
-            return Ok(false); // No change
-        }
+            if existing_hash == Some(hash.clone()) {
+                return Ok(false); // Sin cambios, no reindexar
+            }
 
-        // Clean old data for this file
-        conn.execute("DELETE FROM symbols WHERE file_path = ?", params![rel_path])?;
-        conn.execute("DELETE FROM call_graph WHERE caller_file = ?", params![rel_path])?;
-        conn.execute("DELETE FROM import_usage WHERE file_path = ?", params![rel_path])?;
+            conn.execute("DELETE FROM symbols WHERE file_path = ?", params![rel_path])?;
+            conn.execute("DELETE FROM call_graph WHERE caller_file = ?", params![rel_path])?;
+            conn.execute("DELETE FROM import_usage WHERE file_path = ?", params![rel_path])?;
+        } // MutexGuard suelto aquí
 
-        // Parse with tree-sitter
+        // Fase 2: parsear con tree-sitter (adquiere el mutex internamente)
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let language = match ext {
             "ts" | "tsx" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
@@ -65,7 +68,8 @@ impl ProjectIndexBuilder {
             self.parse_and_fill(&lang, &content, &rel_path)?;
         }
 
-        // Update file index
+        // Fase 3: actualizar índice de archivos
+        let conn = self.db.lock();
         conn.execute(
             "INSERT OR REPLACE INTO file_index (file_path, content_hash, last_indexed) VALUES (?, ?, CURRENT_TIMESTAMP)",
             params![rel_path, hash],

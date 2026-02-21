@@ -1,8 +1,6 @@
 use crate::agents::base::{Agent, AgentContext, Task, TaskResult};
 use crate::ai::client::{consultar_ia_dinamico, TaskType};
-use crate::ai::utils::extraer_codigo;
 use async_trait::async_trait;
-use colored::*;
 use std::sync::Arc;
 
 pub struct FixSuggesterAgent;

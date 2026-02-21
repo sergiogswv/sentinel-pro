@@ -172,7 +172,9 @@ pub fn extraer_json_sugerencias(texto: &str) -> String {
             return code;
         }
     }
-    extraer_json(texto)
+    // No hacer fallback a extraer_json: evita agarrar bloques de código
+    // (ej. JavaScript que empieza con `[{`) como si fueran JSON válido.
+    "[]".to_string()
 }
 
 #[cfg(test)]

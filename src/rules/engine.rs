@@ -1,5 +1,5 @@
 use crate::rules::{FrameworkDefinition, FrameworkRule, RuleViolation, RuleLevel};
-use crate::rules::static_analysis::{StaticAnalyzer, DeadCodeAnalyzer, UnusedImportsAnalyzer, ComplexityAnalyzer, NamingAnalyzer};
+use crate::rules::static_analysis::{StaticAnalyzer, DeadCodeAnalyzer, UnusedImportsAnalyzer, ComplexityAnalyzer};
 use std::fs;
 use std::path::Path;
 use tree_sitter::Language;

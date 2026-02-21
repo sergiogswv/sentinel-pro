@@ -53,14 +53,68 @@ try {
 $rustcVersion = rustc --version
 Show-Info "Versión de Rust: $rustcVersion"
 
-# Compilar e Instalar el proyecto globalmente
-Show-Info "Instalando Sentinel Pro globalmente con cargo..."
+# Compilar e Instalar el proyecto
+Show-Info "Compilando Sentinel Pro en modo release..."
 try {
-    # Usamos cargo install para que esté disponible en cualquier terminal automáticamente
-    cargo install --path . --force
-    Show-Success "Sentinel ha sido instalado en tu directorio de binarios de Rust (~\.cargo\bin)"
+    cargo build --release
+    if ($LASTEXITCODE -ne 0) {
+        Show-Error "La compilación falló. Revisa los errores arriba."
+    }
+    Show-Success "Compilación exitosa."
 } catch {
-    Show-Error "Falló la instalación vía cargo. Asegúrate de que no haya procesos de Sentinel abiertos."
+    Show-Error "No se pudo ejecutar cargo build. ¿Está Rust instalado?"
+}
+
+# Recolectar todas las ubicaciones donde instalar
+$destinos = @()
+
+# 1. ~/bin (instalación propia)
+$binPath = "$env:USERPROFILE\bin"
+if (!(Test-Path $binPath)) {
+    Show-Info "Creando carpeta $binPath..."
+    New-Item -ItemType Directory -Path $binPath | Out-Null
+}
+$destinos += "$binPath\sentinel.exe"
+
+# 2. ~/.cargo/bin (standard Rust location)
+$cargoBin = "$env:USERPROFILE\.cargo\bin\sentinel.exe"
+# Siempre intentamos actualizar este también si existe o si queremos que esté allí
+$destinos += $cargoBin
+
+# Copiar a cada destino
+$copiasFallidas = @()
+foreach ($destino in $destinos) {
+    $timestampAntes = $null
+    if (Test-Path $destino) {
+        $timestampAntes = (Get-Item $destino).LastWriteTime
+    }
+
+    Show-Info "Instalando en: $destino..."
+    try {
+        Copy-Item "target\release\sentinel.exe" -Destination $destino -Force -ErrorAction Stop
+
+        # Verificar que la copia realmente cambió el archivo
+        $timestampDespues = (Get-Item $destino).LastWriteTime
+        if ($timestampAntes -and $timestampAntes -eq $timestampDespues) {
+            Write-Host "  ⚠️ ADVERTENCIA: El archivo no cambió. Puede estar bloqueado." -ForegroundColor Yellow
+            $copiasFallidas += $destino
+        } else {
+            Show-Success "  OK"
+        }
+    } catch {
+        Write-Host "  ❌ ERROR: $_" -ForegroundColor Red
+        Write-Host "  El archivo puede estar en uso por Sentinel Monitor o VS Code. Ciérralos y reintenta." -ForegroundColor Yellow
+        $copiasFallidas += $destino
+    }
+}
+
+if ($copiasFallidas.Count -gt 0) {
+    Write-Host ""
+    Write-Host "No se pudieron actualizar todos los binarios:" -ForegroundColor Red
+    $copiasFallidas | ForEach-Object { Write-Host "  $_" -ForegroundColor White }
+    Write-Host "Cierra todas las terminales y aplicaciones que usen Sentinel y vuelve a ejecutar el script." -ForegroundColor Yellow
+    Write-Host ""
+    exit 1
 }
 
 # Crear directorio de casa de Sentinel para recursos (Qdrant, Modelos, etc.)

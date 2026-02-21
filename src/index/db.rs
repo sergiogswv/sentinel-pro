@@ -8,15 +8,28 @@ pub struct IndexDb {
 
 impl IndexDb {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    rusqlite::Error::SqliteFailure(
+                        rusqlite::ffi::Error::new(14), // SQLITE_CANTOPEN
+                        Some(format!("No se pudo crear el directorio padre: {}", e)),
+                    )
+                })?;
+            }
+        }
         let conn = Connection::open(path)?;
-        let db = Self { conn: Mutex::new(conn) };
+        let db = Self {
+            conn: Mutex::new(conn),
+        };
         db.initialize_tables()?;
         Ok(db)
     }
 
     fn initialize_tables(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        
+
         // 1. ÍNDICE DE SÍMBOLOS
         conn.execute(
             "CREATE TABLE IF NOT EXISTS symbols (
@@ -84,14 +97,25 @@ impl IndexDb {
         )?;
 
         // Índices para velocidad
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file_path)", [])?;
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_call_callee ON call_graph(callee_symbol)", [])?;
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_imports_file ON import_usage(file_path)", [])?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file_path)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_call_callee ON call_graph(callee_symbol)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_imports_file ON import_usage(file_path)",
+            [],
+        )?;
 
         Ok(())
     }
 
     pub fn lock(&self) -> MutexGuard<'_, Connection> {
-        self.conn.lock().expect("Failed to lock database connection")
+        self.conn
+            .lock()
+            .expect("Failed to lock database connection")
     }
 }

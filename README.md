@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/version-5.0.0--pro.beta.3-purple.svg" alt="Version">
   <img src="https://img.shields.io/badge/rust-2024-orange.svg" alt="Rust">
-  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
+  <img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License">
 </p>
 
 ---
@@ -193,15 +193,16 @@ Phase 10: 📅 Planned - Monetization & Licensing (SaaS)
 
 ---
 
-## 📝 License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+## License
+Sentinel Pro is licensed under [AGPL-3.0](LICENSE).
+For commercial licensing, contact: tu@email.com
 
 ---
 
 ## 👤 Author
 
 **Sergio Guadarrama**
+**sergio.gs8925@gmail.com**
 
 ---
 

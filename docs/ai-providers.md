@@ -1,6 +1,22 @@
 # AI Providers
 
-Sentinel can work with multiple AI providers. Choose the one that best suits your needs.
+Sentinel works with multiple AI providers. The quality of AI-powered features (`pro review`, `pro analyze`, `pro fix`) depends directly on the model you choose.
+
+## Model Capability Requirements
+
+| Feature | Local (≤7B) | Local (70B+) | Cloud API |
+|---------|:-----------:|:------------:|:---------:|
+| `sentinel monitor` (Layer 1 static) | ✅ | ✅ | ✅ |
+| Commit messages | ✅ | ✅ | ✅ |
+| `pro fix` (small files) | ⚠️ Generic | ✅ | ✅ |
+| `pro analyze <file>` | ⚠️ Generic | ✅ | ✅ |
+| `pro review` (architecture audit) | ❌ Hallucination | ⚠️ Limited | ✅ |
+| `pro refactor` | ❌ | ⚠️ Limited | ✅ |
+
+> **Recommendation:** Use cloud APIs (Claude or Gemini) for `pro` commands.
+> Ollama is a great option for `sentinel monitor` + commits in air-gapped environments.
+
+---
 
 ## Supported AI Providers
 
@@ -171,13 +187,62 @@ See the [Security Guide](security.md) for detailed information on:
 
 ---
 
+## Local Models (Ollama / LM Studio)
+
+Run Sentinel completely offline — no API key required.
+
+> **⚠️ Important:** Models smaller than 70B parameters typically produce **generic analysis** for `pro review` and `pro analyze`. They work well for `sentinel monitor`, commit messages, and simple fixes. For deep architectural reviews, use a cloud API.
+
+### Ollama
+
+**Prerequisites:** [Install Ollama](https://ollama.com) and pull a model.
+
+```bash
+# Recommended models for code analysis:
+ollama pull qwen2.5-coder:7b      # Fast, good for commits/simple fixes
+ollama pull codellama:34b          # Better quality for analysis
+ollama pull llama3.1:70b           # Best local option for pro review
+```
+
+**Configuration:**
+```toml
+[primary_model]
+provider = "ollama"
+name = "qwen2.5-coder:7b"
+url = "http://localhost:11434"
+api_key = ""
+```
+
+**What works well with small models (≤7B):**
+- Real-time monitoring with static analysis (Layer 1 — no AI)
+- Automatic commit messages (`g` / `gc` commands)
+- Simple single-file fixes (`pro fix`)
+- Test generation for simple functions
+
+**What requires a larger model (70B+) or cloud API:**
+- `sentinel pro review` — full architectural audit
+- `sentinel pro analyze <file>` — deep semantic analysis
+- `sentinel pro refactor` — complex refactoring
+
+> **Note:** Sentinel will warn you when a local model is detected and you run a `pro` command that benefits from cloud models.
+
+### LM Studio
+
+```toml
+[primary_model]
+provider = "lm-studio"
+name = "your-model-name"
+url = "http://localhost:1234"
+api_key = "lm-studio"
+```
+
+---
+
 ## Future Providers (Roadmap)
 
-Planned support for additional providers:
-- OpenAI (GPT-4, GPT-3.5)
+- OpenAI (GPT-4o, o1)
 - Mistral AI
-- Local models (Ollama, LM Studio)
-- Dynamic model selection based on task type
+- Dynamic model selection based on task type (light tasks → local, deep tasks → cloud)
 
 ---
 

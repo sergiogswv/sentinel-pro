@@ -1,6 +1,5 @@
 use crate::agents::base::{Agent, AgentContext, Task, TaskResult};
 use crate::ai::client::{TaskType, consultar_ia_dinamico};
-use crate::ai::utils::extraer_codigo;
 use async_trait::async_trait;
 use std::sync::Arc;
 

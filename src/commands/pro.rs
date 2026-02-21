@@ -1217,40 +1217,106 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             let deps = crate::files::leer_dependencias(&agent_context.project_root);
             let deps_list = deps.join(", ");
 
+            // 3. Muestra de archivos fuente reales (máx 4 archivos, 60 líneas c/u)
+            // Prioriza src/ para evitar que node_modules/dist/vendor se cuelen primero.
+            let dirs_ignorados = [
+                "node_modules", "dist", "build", ".next", ".nuxt",
+                "vendor", "target", ".git", "__pycache__", "coverage",
+            ];
+            let mut codigo_muestra = String::new();
+            let mut muestras = 0usize;
+            let walk_root = {
+                let src = agent_context.project_root.join("src");
+                if src.exists() { src } else { agent_context.project_root.clone() }
+            };
+            let walker_src = ignore::WalkBuilder::new(&walk_root)
+                .hidden(false)
+                .git_ignore(true)
+                .build();
+            for entry_result in walker_src {
+                if muestras >= 4 {
+                    break;
+                }
+                if let Ok(entry) = entry_result {
+                    let p = entry.path();
+                    // Saltar directorios de dependencias/build aunque no estén en .gitignore
+                    if dirs_ignorados.iter().any(|d| {
+                        p.components().any(|c| c.as_os_str() == *d)
+                    }) {
+                        continue;
+                    }
+                    if !p.is_file() {
+                        continue;
+                    }
+                    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    if agent_context.config.file_extensions.contains(&ext.to_string()) {
+                        if let Ok(contenido) = std::fs::read_to_string(p) {
+                            let preview: String =
+                                contenido.lines().take(60).collect::<Vec<_>>().join("\n");
+                            let rel = p
+                                .strip_prefix(&agent_context.project_root)
+                                .map(|r| r.display().to_string())
+                                .unwrap_or_else(|_| p.display().to_string());
+                            codigo_muestra
+                                .push_str(&format!("\n\n=== {} ===\n{}", rel, preview));
+                            muestras += 1;
+                        }
+                    }
+                }
+            }
+
             pb.finish_with_message("Estructura analizada.");
+
+            // Aviso si el modelo configurado es local — los modelos pequeños (≤7B)
+            // pueden generar análisis genérico en lugar de feedback específico del código.
+            let model = &agent_context.config.primary_model;
+            let is_local = matches!(model.provider.as_str(), "ollama" | "local" | "lm-studio")
+                || model.url.contains("localhost")
+                || model.url.contains("127.0.0.1");
+            if is_local {
+                println!(
+                    "\n{} Modelo local detectado ({}).",
+                    "⚠️ ".yellow(),
+                    model.name.yellow()
+                );
+                println!(
+                    "   {} Para análisis profundo (pro review, pro analyze) se recomiendan",
+                    "ℹ️ ".cyan()
+                );
+                println!("   modelos de 70B+ o APIs en la nube (Claude / Gemini).");
+                println!("   Los modelos pequeños pueden producir sugerencias genéricas.\n");
+            }
 
             let pb_agent =
                 ui::crear_progreso("Ejecutando Auditoría de Arquitectura (ReviewerAgent)...");
 
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
-                description: "Realiza una auditoría técnica de alto nivel del proyecto. \n\
-                              TU OBJETIVO: Evaluar la arquitectura, organización y stack tecnológico.\n\
-                              1. Analiza la estructura de directorios: ¿Sigue buenas prácticas (DDD, Clean Arch, MVC)?\n\
-                              2. Analiza las dependencias.\n\
-                              3. Identifica cuellos de botella o deuda técnica.\n\n\
-                              INSTRUCCIONES DE SALIDA:\n\
-                              - Primero escribe tu análisis detallado en lenguaje humano.\n\
-                              - AL FINAL DE TODO, añade OBLIGATORIAMENTE un bloque ```json con un ARRAY de sugerencias.\n\
-                              - IMPORTANTE: El JSON DEBE ser un array [...], NUNCA un objeto {} suelto.\n\
-                              - NO incluyas explicaciones dentro del bloque JSON.\n\n\
-                              ESTRUCTURA DEL JSON (Obligatorio, siempre array):\n\
+                description: "Realiza una auditoría técnica de alto nivel del proyecto.\n\
+                              TU OBJETIVO: Evaluar la arquitectura, organización y stack tecnológico BASÁNDOTE en el código fuente real adjunto.\n\n\
+                              INSTRUCCIONES DE SALIDA (sigue este orden exacto):\n\n\
+                              PASO 1 — Emite PRIMERO el bloque JSON con las sugerencias (máximo 6, las más importantes):\n\
                               ```json\n\
                               [\n\
                                 {\n\
                                   \"title\": \"Título breve\",\n\
-                                  \"description\": \"Descripción de la mejora\",\n\
+                                  \"description\": \"Descripción de la mejora con evidencia del código revisado\",\n\
                                   \"impact\": \"High/Medium/Low\",\n\
-                                  \"action_item\": \"Instrucción técnica para el CoderAgent\",\n\
+                                  \"action_item\": \"Instrucción técnica específica y accionable\",\n\
                                   \"files_involved\": [\"ruta/al/archivo\"]\n\
                                 }\n\
                               ]\n\
-                              ```".to_string(),
+                              ```\n\n\
+                              PASO 2 — Luego escribe el análisis detallado:\n\
+                              1. Organización del proyecto: ¿Sigue DDD, Clean Arch, MVC u otro patrón?\n\
+                              2. Stack tecnológico: fortalezas y ausencias críticas.\n\
+                              3. Análisis de código específico: menciona archivos, funciones y líneas reales.\n\
+                              4. Deuda técnica y riesgos de seguridad con evidencia concreta.".to_string(),
                 task_type: TaskType::Analyze,
                 file_path: None,
                 context: Some(format!(
-                    "ESTADÍSTICAS:\nArchivos escaneados: {}\n\nESTRUCTURA DE DIRECTORIOS:\n{}\n\nSTACK TECNOLÓGICO (Dependencias):\n{}", 
-                    file_count, project_tree, deps_list
+                    "ESTADÍSTICAS:\nArchivos escaneados: {}\n\nESTRUCTURA DE DIRECTORIOS:\n{}\n\nSTACK TECNOLÓGICO (Dependencias):\n{}\n\nMUESTRA DE CÓDIGO FUENTE (para análisis concreto):\n{}",
+                    file_count, project_tree, deps_list, codigo_muestra
                 )),
             };
 
@@ -1268,7 +1334,12 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     
                     // Mostrar solo el texto humano, ocultar el JSON del output principal
                     let report_only = crate::ai::utils::eliminar_bloques_codigo(&res.output);
-                    println!("{}", report_only);
+                    // Si el JSON va primero (para evitar truncación), eliminar_bloques_codigo
+                    // deja un marcador al inicio — lo quitamos para una salida limpia.
+                    let report_display = report_only
+                        .trim_start_matches("[... Código guardado en .suggested ...]")
+                        .trim();
+                    println!("{}", report_display);
 
                     // 3. Extraer y procesar sugerencias JSON
                     // Usar extractor semántico que valida campos de ReviewSuggestion
@@ -1286,7 +1357,16 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                             println!("\n💡 {} sugerencias de mejora detectadas.", suggestions.len().to_string().cyan());
                             
                             let mut options: Vec<String> = suggestions.iter()
-                                .map(|s| format!("[{}] {} - {}", s.impact.to_uppercase(), s.title.bold(), s.description))
+                                .map(|s| {
+                                    let line = format!("[{}] {} — {}", s.impact.to_uppercase(), s.title, s.description);
+                                    // Truncar a 90 chars: evita wrap en terminales estrechas
+                                    // que rompe la navegación de dialoguer
+                                    if line.chars().count() > 90 {
+                                        format!("{}…", line.chars().take(89).collect::<String>())
+                                    } else {
+                                        line
+                                    }
+                                })
                                 .collect();
                             
                             options.push("🚪 Salir".to_string());
@@ -1306,6 +1386,15 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                                     // Ejecutar implementación
                                     let pb_dev = ui::crear_progreso(&format!("Aplicando mejora: {}...", suggestion.title));
                                     
+                                    // Leer el contenido real del archivo principal involucrado
+                                    // para que el modelo tenga el código actual y no genere a ciegas.
+                                    let file_context = suggestion.files_involved.first().and_then(|f| {
+                                        let path = agent_context.project_root.join(f);
+                                        std::fs::read_to_string(&path)
+                                            .ok()
+                                            .map(|content| format!("CONTENIDO ACTUAL DE {}:\n```\n{}\n```", f, content))
+                                    });
+
                                     let dev_task = Task {
                                         id: uuid::Uuid::new_v4().to_string(),
                                         description: format!(
@@ -1313,14 +1402,13 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                                             TÍTULO: {}\n\
                                             DESCRIPCIÓN: {}\n\
                                             ACCIÓN REQUERIDA: {}\n\n\
-                                            OBJETIVO: Realiza los cambios necesarios en el proyecto para implementar esta mejora. \
-                                            Si se mencionan archivos específicos ({:?}), priorízalos. \
-                                            Devuelve el código COMPLETO corregido o las nuevas implementaciones.",
-                                            suggestion.title, suggestion.description, suggestion.action_item, suggestion.files_involved
+                                            OBJETIVO: Aplica la mejora al código real adjunto. \
+                                            Devuelve el archivo COMPLETO corregido — sin omitir ni resumir ninguna parte.",
+                                            suggestion.title, suggestion.description, suggestion.action_item
                                         ),
                                         task_type: TaskType::Fix,
                                         file_path: suggestion.files_involved.first().map(|f| std::path::PathBuf::from(f)),
-                                        context: None,
+                                        context: file_context,
                                     };
 
                                     let dev_result = rt.block_on(orchestrator.execute_task("FixSuggesterAgent", &dev_task, &agent_context));
@@ -1407,15 +1495,9 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                             // Array vacío: el AI no generó sugerencias pero el input fue correcto
                             println!("\n{} El análisis no generó sugerencias de mejora concretas.", "ℹ️".cyan());
                         }
-                        Err(parse_err) => {
-                            println!("\n{} No se pudieron parsear las sugerencias como JSON estructurado.", "⚠️".yellow());
-                            println!("   Detalle: {}", parse_err);
-                            println!("   Fragmento extraído:\n---");
-                            // Mostrar solo los primeros 300 chars para no inundar la terminal
-                            let preview = if json_str.len() > 300 { &json_str[..300] } else { &json_str };
-                            println!("{}", preview);
-                            println!("---");
-                            println!("   Tip: El AI debe responder con un bloque ```json [ ... ] ``` con objetos que tengan los campos: title, description, impact, action_item, files_involved.");
+                        Err(_) => {
+                            // El JSON se truncó (respuesta muy larga) — el análisis textual ya se mostró arriba
+                            println!("\n{} Las sugerencias interactivas no están disponibles (respuesta demasiado extensa).", "ℹ️".cyan());
                         }
                     }
                 }

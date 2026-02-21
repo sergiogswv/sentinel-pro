@@ -73,11 +73,10 @@ pub struct MlConfig {
     pub bug_predictor_model: String,
 }
 
-
 impl Default for ModelConfig {
     fn default() -> Self {
         Self {
-            name: "claude-opus-4-5-20251101".to_string(),
+            name: "claude-3-5-sonnet-20241022".to_string(),
             url: "https://api.anthropic.com".to_string(),
             api_key: "".to_string(),
             provider: "anthropic".to_string(),
@@ -128,7 +127,7 @@ impl SentinelConfig {
         test_patterns: Vec<String>,
     ) -> Self {
         let default_model = ModelConfig {
-            name: "claude-opus-4-5-20251101".to_string(),
+            name: "claude-3-5-sonnet-20241022".to_string(),
             url: "https://api.anthropic.com".to_string(),
             api_key: "".to_string(),
             provider: "anthropic".to_string(),
@@ -495,7 +494,6 @@ impl SentinelConfig {
             });
         }
 
-
         if config.ml.is_none() {
             config.ml = Some(MlConfig {
                 models_path: ".sentinel/models".to_string(),
@@ -506,9 +504,35 @@ impl SentinelConfig {
 
         // Limpieza de URLs: asegurar que tengan esquema
         if !config.primary_model.url.contains("://") && !config.primary_model.url.is_empty() {
-            config.primary_model.url = format!("http://{}", config.primary_model.url);
+            config.primary_model.url = format!("https://{}", config.primary_model.url);
         }
 
+        // Migración/Inferencia de proveedor si está vacío o es incorrecto
+        let inferir_proveedor = |model: &mut ModelConfig| {
+            let url = model.url.to_lowercase();
+            if model.provider.is_empty()
+                || (model.provider == "anthropic" && !url.contains("anthropic"))
+            {
+                if url.contains("deepseek") {
+                    model.provider = "deepseek".to_string();
+                } else if url.contains("googleapis") {
+                    model.provider = "gemini".to_string();
+                } else if url.contains("groq") {
+                    model.provider = "groq".to_string();
+                } else if url.contains("moonshot") || url.contains("kimi") {
+                    model.provider = "kimi".to_string();
+                } else if url.contains("openai") {
+                    model.provider = "openai".to_string();
+                } else if url.contains("localhost") || url.contains("127.0.0.1") {
+                    model.provider = "ollama".to_string();
+                }
+            }
+        };
+
+        inferir_proveedor(&mut config.primary_model);
+        if let Some(ref mut fb) = config.fallback_model {
+            inferir_proveedor(fb);
+        }
 
         config
     }

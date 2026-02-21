@@ -11,6 +11,7 @@ pub mod analysis;
 pub mod cache;
 pub mod client;
 pub mod framework;
+pub mod providers;
 pub mod testing;
 pub mod utils;
 

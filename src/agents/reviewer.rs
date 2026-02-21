@@ -1,7 +1,6 @@
 use crate::agents::base::{Agent, AgentContext, Task, TaskResult};
 use crate::ai::client::{TaskType, consultar_ia_dinamico};
 use async_trait::async_trait;
-use colored::*;
 use std::sync::Arc;
 
 pub struct ReviewerAgent;

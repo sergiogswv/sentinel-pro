@@ -26,7 +26,7 @@ pub fn secure_join(project_root: &Path, target: &Path) -> Result<PathBuf, String
     if !is_safe_path(target) {
         return Err(format!("Intento de Path Traversal detectado: {:?}", target));
     }
-    
+
     if target.is_absolute() {
         if !target.starts_with(project_root) {
             return Err(format!("Ruta absoluta fuera del proyecto: {:?}", target));
@@ -213,8 +213,8 @@ pub fn sufijos_sin_test_por_framework(framework: &str) -> Vec<&'static str> {
             ".config.ts",
             ".exception.ts",
             ".error.ts",
-            ".decorator.ts",  // decoradores simples raramente se testean
-            ".schema.ts",     // Mongoose schemas
+            ".decorator.ts", // decoradores simples raramente se testean
+            ".schema.ts",    // Mongoose schemas
         ]
     } else if fw.contains("django") {
         vec![
@@ -249,11 +249,7 @@ pub fn sufijos_sin_test_por_framework(framework: &str) -> Vec<&'static str> {
             ".types.ts",
         ]
     } else if fw.contains("rails") || fw.contains("ruby") {
-        vec![
-            "schema.rb",
-            "seeds.rb",
-            "routes.rb",
-        ]
+        vec!["schema.rb", "seeds.rb", "routes.rb"]
     } else {
         vec![]
     }
@@ -264,18 +260,28 @@ pub fn sufijos_sin_test_por_framework(framework: &str) -> Vec<&'static str> {
 /// Útil como fallback cuando los tests generados no siguen los `test_patterns` del config.
 pub fn buscar_test_en_directorios(base_name: &str, project_path: &Path) -> bool {
     let dirs_a_revisar = ["test", "tests", "__tests__", "spec"];
-    let extensiones_test = [".spec.ts", ".test.ts", ".spec.js", ".test.js",
-                            ".spec.tsx", ".test.tsx", "_test.go", "_test.py",
-                            "Test.php", ".spec.py"];
+    let extensiones_test = [
+        ".spec.ts",
+        ".test.ts",
+        ".spec.js",
+        ".test.js",
+        ".spec.tsx",
+        ".test.tsx",
+        "_test.go",
+        "_test.py",
+        "Test.php",
+        ".spec.py",
+    ];
 
     for dir_name in &dirs_a_revisar {
         let test_dir = project_path.join(dir_name);
-        if !test_dir.exists() { continue; }
+        if !test_dir.exists() {
+            continue;
+        }
 
-        let walker = match std::fs::read_dir(&test_dir) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
+        if std::fs::read_dir(&test_dir).is_err() {
+            continue;
+        }
 
         // Búsqueda recursiva simple
         if buscar_en_dir_recursivo(base_name, &test_dir, &extensiones_test) {
@@ -286,7 +292,9 @@ pub fn buscar_test_en_directorios(base_name: &str, project_path: &Path) -> bool 
 }
 
 fn buscar_en_dir_recursivo(base_name: &str, dir: &Path, extensiones: &[&str]) -> bool {
-    let Ok(entries) = std::fs::read_dir(dir) else { return false; };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -323,7 +331,9 @@ pub fn leer_dependencias(project_path: &Path) -> Vec<String> {
                 if let Some(dependencies) = json.get("dependencies").and_then(|v| v.as_object()) {
                     deps.extend(dependencies.keys().cloned());
                 }
-                if let Some(dev_dependencies) = json.get("devDependencies").and_then(|v| v.as_object()) {
+                if let Some(dev_dependencies) =
+                    json.get("devDependencies").and_then(|v| v.as_object())
+                {
                     deps.extend(dev_dependencies.keys().cloned());
                 }
             }
@@ -347,7 +357,7 @@ pub fn leer_dependencias(project_path: &Path) -> Vec<String> {
 
                 if in_deps && !trimmed.is_empty() && !trimmed.starts_with("#") {
                     if let Some(name) = trimmed.split('=').next() {
-                         deps.push(name.trim().to_string());
+                        deps.push(name.trim().to_string());
                     }
                 }
             }

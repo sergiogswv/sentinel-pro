@@ -2,6 +2,7 @@
 name = "sentinel-rust"
 version = "5.0.0-pro.beta.3"
 edition = "2024"
+license = "AGPL-3.0-only"
 
 [[bin]]
 name = "sentinel"

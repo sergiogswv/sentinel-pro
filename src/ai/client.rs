@@ -1,17 +1,16 @@
 //! Cliente para comunicación con APIs de IA
 //!
-//! Soporta múltiples proveedores:
-//! - Anthropic (Claude)
-//! - Google Gemini (Content API e Interactions API)
+//! Soporta múltiples proveedores a través del trait AiProvider.
+//! Para agregar un proveedor nuevo, ver `src/ai/providers/mod.rs`.
 //!
 //! Incluye sistema de fallback automático entre modelos.
 
 use crate::ai::cache::{guardar_en_cache, intentar_leer_cache};
+use crate::ai::providers::build_provider;
 use crate::config::{ModelConfig, SentinelConfig};
 use crate::stats::SentinelStats;
 use colored::*;
 use reqwest::blocking::Client;
-use serde_json::json;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -103,253 +102,17 @@ pub fn consultar_ia(
         .unwrap_or_else(|_| Client::new());
 
     let prompt_len = prompt.len();
-    let resultado = if !model.provider.is_empty() {
-        match model.provider.as_str() {
-            "gemini" => {
-                consultar_gemini_content(&client, prompt, &model.api_key, &model.url, &model.name)
-            }
-            "interactions" => consultar_gemini_interactions(
-                &client,
-                prompt,
-                &model.api_key,
-                &model.url,
-                &model.name,
-            ),
-            "ollama" => consultar_ollama(&client, prompt, &model.url, &model.name),
-            "lm-studio" | "openai" => {
-                consultar_openai_compat(&client, prompt, &model.api_key, &model.url, &model.name)
-            }
-            _ => consultar_anthropic(&client, prompt, &model.api_key, &model.url, &model.name),
-        }
-    } else if model.url.contains("interactions") {
-        consultar_gemini_interactions(&client, prompt, &model.api_key, &model.url, &model.name)
-    } else if model.url.contains("googleapis.com") {
-        consultar_gemini_content(&client, prompt, &model.api_key, &model.url, &model.name)
-    } else {
-        consultar_anthropic(&client, prompt, &model.api_key, &model.url, &model.name)
-    };
+    let provider = build_provider(model);
+    let resultado = provider.chat(&client, &prompt, &model.name);
 
     if let Ok(ref res) = resultado {
-        // Track stats (Estimación simple: 1 token ≈ 4 caracteres)
         let tokens = (res.len() as u64 / 4) + (prompt_len as u64 / 4);
         let mut s = stats.lock().unwrap();
         s.total_tokens_used += tokens;
-
-        // Estimación de costo: 0.01$ por cada 1K tokens (promedio)
         s.total_cost_usd += (tokens as f64 / 1000.0) * 0.01;
     }
 
     resultado
-}
-
-fn consultar_gemini_interactions(
-    client: &Client,
-    prompt: String,
-    api_key: &str,
-    base_url: &str,
-    model_name: &str,
-) -> anyhow::Result<String> {
-    let response = client
-        .post(base_url)
-        .header("x-goog-api-key", api_key)
-        .header("content-type", "application/json")
-        .json(&json!({
-            "model": model_name,
-            "input": prompt
-        }))
-        .send()?;
-
-    let status = response.status();
-    let body_text = response.text()?;
-
-    if !status.is_success() {
-        return Err(anyhow::anyhow!(
-            "Error de API Gemini Interactions (Status {}): {}",
-            status,
-            body_text
-        ));
-    }
-
-    let body: serde_json::Value = serde_json::from_str(&body_text)?;
-
-    body["output"]
-        .as_str()
-        .or_else(|| {
-            body["outputs"].as_array().and_then(|outputs| {
-                outputs
-                    .iter()
-                    .find(|o| o["type"] == "text")
-                    .and_then(|o| o["text"].as_str())
-            })
-        })
-        .or_else(|| body["candidates"][0]["content"]["parts"][0]["text"].as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "No se pudo encontrar el texto en la respuesta de Gemini Interactions. Body: {}",
-                body_text
-            )
-        })
-}
-
-fn consultar_gemini_content(
-    client: &Client,
-    prompt: String,
-    api_key: &str,
-    base_url: &str,
-    model_name: &str,
-) -> anyhow::Result<String> {
-    let url = if base_url.contains("generateContent") {
-        base_url.to_string()
-    } else {
-        format!(
-            "{}/v1beta/models/{}:generateContent",
-            base_url.trim_end_matches('/'),
-            model_name
-        )
-    };
-
-    let response = client
-        .post(&url)
-        .header("x-goog-api-key", api_key)
-        .header("content-type", "application/json")
-        .json(&json!({
-            "contents": [{
-                "parts": [{ "text": prompt }]
-            }]
-        }))
-        .send()?;
-
-    let status = response.status();
-    let body_text = response.text()?;
-
-    if !status.is_success() {
-        return Err(anyhow::anyhow!(
-            "Error de API Gemini (Status {}): {}",
-            status,
-            body_text
-        ));
-    }
-
-    let body: serde_json::Value = serde_json::from_str(&body_text)?;
-    body["candidates"][0]["content"]["parts"][0]["text"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| anyhow::anyhow!("Estructura de Gemini inesperada. Body: {}", body_text))
-}
-
-fn consultar_anthropic(
-    client: &Client,
-    prompt: String,
-    api_key: &str,
-    base_url: &str,
-    model_name: &str,
-) -> anyhow::Result<String> {
-    let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
-
-    let response = client
-        .post(&url)
-        .header("x-api-key", api_key)
-        .header("content-type", "application/json")
-        .json(&json!({
-            "model": model_name,
-            "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}]
-        }))
-        .send()?;
-
-    let status = response.status();
-    let body_text = response.text()?;
-
-    if !status.is_success() {
-        return Err(anyhow::anyhow!(
-            "Error de API Anthropic (Status {}): {}",
-            status,
-            body_text
-        ));
-    }
-
-    let body: serde_json::Value = serde_json::from_str(&body_text)?;
-    body["content"][0]["text"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| anyhow::anyhow!("Estructura de Anthropic inesperada. Body: {}", body_text))
-}
-
-fn consultar_ollama(
-    client: &Client,
-    prompt: String,
-    base_url: &str,
-    model_name: &str,
-) -> anyhow::Result<String> {
-    let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
-
-    let response = client
-        .post(&url)
-        .json(&json!({
-            "model": model_name,
-            "prompt": prompt,
-            "stream": false
-        }))
-        .send()?;
-
-    let status = response.status();
-    let body_text = response.text()?;
-
-    if !status.is_success() {
-        return Err(anyhow::anyhow!(
-            "Error de API Ollama (Status {}): {}",
-            status,
-            body_text
-        ));
-    }
-
-    let body: serde_json::Value = serde_json::from_str(&body_text)?;
-    body["response"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| anyhow::anyhow!("Estructura de Ollama inesperada. Body: {}", body_text))
-}
-
-fn consultar_openai_compat(
-    client: &Client,
-    prompt: String,
-    api_key: &str,
-    base_url: &str,
-    model_name: &str,
-) -> anyhow::Result<String> {
-    let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
-
-    let response = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&json!({
-            "model": model_name,
-            "messages": [{"role": "user", "content": prompt}]
-        }))
-        .send()?;
-
-    let status = response.status();
-    let body_text = response.text()?;
-
-    if !status.is_success() {
-        return Err(anyhow::anyhow!(
-            "Error de API OpenAI-Compat/LM-Studio (Status {}): {}",
-            status,
-            body_text
-        ));
-    }
-
-    let body: serde_json::Value = serde_json::from_str(&body_text)?;
-    body["choices"][0]["message"]["content"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Estructura de OpenAI-Compat inesperada. Body: {}",
-                body_text
-            )
-        })
 }
 
 pub fn obtener_embeddings(
@@ -357,132 +120,19 @@ pub fn obtener_embeddings(
     model: &ModelConfig,
 ) -> anyhow::Result<Vec<Vec<f32>>> {
     if !model.url.contains("://") && !model.url.is_empty() && model.provider != "local" {
-         return Err(anyhow::anyhow!("URL del modelo inválida (falta esquema): {}", model.url));
+        return Err(anyhow::anyhow!(
+            "URL del modelo inválida (falta esquema): {}",
+            model.url
+        ));
     }
 
-    match model.provider.as_str() {
-        "gemini" => {
-            let client = Client::new();
-            obtener_embeddings_gemini(&client, textos, &model.api_key, &model.url, &model.name)
-        }
-        "ollama" => {
-            let client = Client::new();
-            obtener_embeddings_ollama(&client, textos, &model.url, &model.name)
-        }
-        "openai" | "lm-studio" => {
-            let client = Client::new();
-            obtener_embeddings_openai(&client, textos, &model.api_key, &model.url, &model.name)
-        }
-        "local" | "anthropic" => {
-            // Usar el singleton centralizado en ml::embeddings
-            let model_arc = crate::ml::embeddings::EmbeddingModel::get_or_init()?;
-            model_arc.embed(&textos)
-        }
-        _ => Err(anyhow::anyhow!(
-            "El proveedor {} no soporta embeddings actualmente",
-            model.provider
-        )),
-    }
-}
-
-fn obtener_embeddings_gemini(
-    client: &Client,
-    textos: Vec<String>,
-    api_key: &str,
-    base_url: &str,
-    model_name: &str,
-) -> anyhow::Result<Vec<Vec<f32>>> {
-    let url = format!(
-        "{}/v1beta/models/{}:batchEmbedContents",
-        base_url.trim_end_matches('/'),
-        model_name
-    );
-
-    let requests: Vec<serde_json::Value> = textos.into_iter().map(|t| {
-        json!({ "model": format!("models/{}", model_name), "content": { "parts": [{ "text": t }] } })
-    }).collect();
-
-    let response = client
-        .post(&url)
-        .header("x-goog-api-key", api_key)
-        .json(&json!({ "requests": requests }))
-        .send()?;
-
-    let body: serde_json::Value = response.json()?;
-    let embeddings = body["embeddings"]
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("Respuesta de Gemini Embeddings inesperada: {}", body))?
-        .iter()
-        .map(|e| {
-            e["values"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| v.as_f64().unwrap() as f32)
-                .collect()
-        })
-        .collect();
-
-    Ok(embeddings)
-}
-
-fn obtener_embeddings_ollama(
-    client: &Client,
-    textos: Vec<String>,
-    base_url: &str,
-    model_name: &str,
-) -> anyhow::Result<Vec<Vec<f32>>> {
-    let url = format!("{}/api/embed", base_url.trim_end_matches('/'));
-    let mut results = Vec::new();
-
-    for texto in textos {
-        let response = client
-            .post(&url)
-            .json(&json!({ "model": model_name, "input": texto }))
-            .send()?;
-
-        let body: serde_json::Value = response.json()?;
-        let embedding = body["embeddings"][0]
-            .as_array()
-            .ok_or_else(|| anyhow::anyhow!("Respuesta de Ollama Embeddings inesperada"))?
-            .iter()
-            .map(|v| v.as_f64().unwrap() as f32)
-            .collect();
-        results.push(embedding);
+    // El caso local no hace llamadas HTTP — se mantiene separado del trait
+    if model.provider == "local" || model.provider == "anthropic" {
+        let model_arc = crate::ml::embeddings::EmbeddingModel::get_or_init()?;
+        return model_arc.embed(&textos);
     }
 
-    Ok(results)
-}
-
-fn obtener_embeddings_openai(
-    client: &Client,
-    textos: Vec<String>,
-    api_key: &str,
-    base_url: &str,
-    model_name: &str,
-) -> anyhow::Result<Vec<Vec<f32>>> {
-    let url = format!("{}/v1/embeddings", base_url.trim_end_matches('/'));
-
-    let response = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&json!({ "model": model_name, "input": textos }))
-        .send()?;
-
-    let body: serde_json::Value = response.json()?;
-    let embeddings = body["data"]
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("Respuesta de OpenAI Embeddings inesperada"))?
-        .iter()
-        .map(|d| {
-            d["embedding"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| v.as_f64().unwrap() as f32)
-                .collect()
-        })
-        .collect();
-
-    Ok(embeddings)
+    let client = Client::new();
+    let provider = build_provider(model);
+    provider.embed(&client, textos, &model.name)
 }

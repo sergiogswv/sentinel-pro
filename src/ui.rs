@@ -462,28 +462,6 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
             config.fallback_model = Some(fb);
         }
 
-        // 3. Configurar Características Pro
-        let enable_pro =
-            dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                .with_prompt("¿Habilitar Machine Learning y Knowledge Base Local?")
-                .default(true)
-                .interact()
-                .unwrap_or(true);
-
-        if enable_pro {
-            config.features = Some(crate::config::FeaturesConfig {
-                enable_ml: true,
-                enable_agents: true,
-                enable_knowledge_base: true,
-            });
-
-            config.ml = Some(crate::config::MlConfig {
-                models_path: ".sentinel/models".to_string(),
-                embeddings_model: "codebert".to_string(),
-                bug_predictor_model: "bug-predictor-v1".to_string(),
-            });
-        }
-
         config
     };
 
@@ -520,7 +498,6 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
             }
         }
     };
-
 
     // Si ya existe configuración y el framework no ha cambiado, no molestamos con re-detección
     // EXCEPTO para testing si no está configurado.
@@ -750,8 +727,6 @@ fn ayudar_configurar_testing(config: &mut SentinelConfig, testing_info: ai::Test
         }
     }
 }
-
-
 
 /// Helper para mostrar una barra de progreso genérica
 pub fn crear_progreso(mensaje: &str) -> indicatif::ProgressBar {
