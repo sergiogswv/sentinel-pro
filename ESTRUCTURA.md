@@ -16,31 +16,38 @@ src/
 │   ├── framework.rs     # Detección de frameworks con IA
 │   ├── analysis.rs      # Análisis de arquitectura
 │   └── utils.rs         # Utilidades (extraer/eliminar código)
-├── agents/        # Sistema Multi-Agente (Etapa 3)
-│   ├── mod.rs           # Definición del módulo y orquestador
-│   ├── base.rs          # Traits y tipos base para agentes
-│   ├── orchestrator.rs  # Gestión de agentes concurrentes
-│   ├── coder.rs         # Agente especializado en código (CoderAgent)
-│   ├── reviewer.rs      # Agente especializado en revisión (ReviewerAgent)
-│   ├── tester.rs        # Agente especializado en tests (TesterAgent)
-│   └── refactor.rs      # Agente especializado en refactor (RefactorAgent)
-├── kb/            # Módulo de Knowledge Base (Etapa 2)
+├── index/         # Módulo de Indexación Inteligente (SQLite)
 │   ├── mod.rs           # Definición del módulo y re-exports
-│   ├── indexer.rs       # Indexación de código con Tree-sitter
-│   ├── vector_db.rs     # Cliente de base de datos vectorial (Qdrant)
-│   ├── context.rs       # Builder de contexto semántico
-│   └── manager.rs       # Orquestador de indexación en background
+│   ├── db.rs            # Base de datos local (rusqlite)
+│   ├── builder.rs       # Constructor de índices de proyecto
+│   ├── symbol_table.rs  # Gestión de símbolos y tipos
+│   ├── call_graph.rs    # Grafo de llamadas y dependencias
+│   └── quality_history.rs # Historial de métricas de calidad
+├── rules/         # Motor de Reglas de Arquitectura
+│   ├── mod.rs           # Definición del motor y esquemas YAML
+│   ├── engine.rs        # Orquestador de validaciones
+│   └── static_analysis.rs # Analizadores Tree-sitter (Dead code, Complexity, Naming)
+├── ml/            # Sistema de Machine Learning Local
+│   ├── mod.rs           # Definición del módulo
+│   ├── embeddings.rs    # Generación de embeddings con candle-transformers
+│   └── predictor.rs     # Predicción heurística de bugs y complejidad
 ├── commands/      # Dispatcher de comandos CLI
 │   ├── mod.rs           # Comandos base (init, monitor)
 │   ├── pro.rs           # Comandos de Sentinel Pro (audit, fix, explain, etc.)
 │   └── monitor.rs       # Lógica persistente de monitoreo
+├── agents/        # Sistema Multi-Agente (Guardián de Calidad)
+│   ├── mod.rs           # Definición del módulo y orquestador
+│   ├── base.rs          # Traits y tipos base para agentes
+│   ├── orchestrator.rs  # Gestión de agentes concurrentes
+│   └── ... (agentes especializados)
+├── business_logic_guard.rs # Guardián de reglas de negocio críticas
 ├── config.rs      # Gestión de configuración (.sentinelrc.toml)
 ├── docs.rs        # Generación de documentación
 ├── files.rs       # Utilidades de detección de archivos padres
 ├── git.rs         # Operaciones de Git
 ├── stats.rs       # Estadísticas y métricas ROI (Dashboard)
 ├── tests.rs       # Ejecución y diagnóstico de tests
-└── ui.rs          # Interfaz de usuario (Spinner, Menús, Prompt)
+└── ui.rs          # Interfaz de usuario (Progresos, Menús, Banners)
 ```
 
 ## Descripción de Módulos
@@ -218,34 +225,37 @@ El módulo AI ha sido refactorizado en submódulos especializados para mejor man
 
 ---
 
-### `kb/` (v5.0.0 Pro - Etapa 2)
-**Responsabilidad**: Gestión de la Base de Conocimiento Local (Knowledge Base)
+### `index/` (v5.0.0 Pro - Lite Refocus)
+**Responsabilidad**: Gestión del Índice del Proyecto (Standalone)
 
-Módulo encargado de indexar el código fuente y proporcionar contexto semántico a la IA.
+Sustituye al antiguo sistema basado en Qdrant por una base de datos SQLite local (`rusqlite`) para mayor velocidad y portabilidad.
 
-#### `kb/indexer.rs`
-**Responsabilidad**: Análisis sintáctico y extracción de símbolos
-- Usa `tree-sitter` para parsear código TypeScript/JavaScript.
-- Extrae clases, funciones, métodos e interfaces.
-- Genera resúmenes sintácticos para indexación.
+- **`index/db.rs`**: Esquema de base de datos para símbolos, grafo de llamadas, historial de calidad y dependencias.
+- **`index/builder.rs`**: Orquestador del escaneo inicial y actualizaciones incrementales.
+- **`index/symbol_table.rs`**: Almacenamiento estructurado de definiciones de clases, métodos e interfaces.
+- **`index/call_graph.rs`**: Mapeo de interconexiones entre archivos para análisis de impacto.
+- **`index/quality_history.rs`**: Persistencia de métricas de calidad a lo largo del tiempo para visualización de tendencias.
 
-#### `kb/vector_db.rs`
-**Responsabilidad**: Gestión de la base de datos vectorial (Qdrant)
-- Inicializa colecciones en Qdrant.
-- Almacena code embeddings con metadatos (ruta, líneas, contenido).
-- Realiza búsquedas por similitud vectorial.
+---
 
-#### `kb/context.rs`
-**Responsabilidad**: Construcción de contexto semántico
-- Genera embeddings para consultas de usuario o cambios de código.
-- Recupera los fragmentos de código más relevantes de la Vector DB.
-- Formatea el contexto para inyectarlo en los prompts de la IA.
+### `rules/` (v5.0.0 Pro - Quality Guardian)
+**Responsabilidad**: Motor de Reglas y Análisis Estático de Capa 1
 
-#### `kb/manager.rs`
-**Responsabilidad**: Orquestación y procesos en background
-- Gestiona la indexación inicial del proyecto completo.
-- Procesa actualizaciones incrementales en segundo plano (vía Tokio mpsc).
-- Coordina la generación de embeddings en batches para optimizar el uso de APIs.
+- **`rules/engine.rs`**: Orquestador que combina reglas estáticas (Tree-sitter) con reglas de arquitectura definidas en YAML (`.sentinel/rules.yaml`).
+- **`rules/static_analysis.rs`**: Implementación de analizadores de alto rendimiento:
+  - **Dead Code**: Detección de variables y funciones declaradas pero no usadas.
+  - **Unused Imports**: Limpieza de módulos no utilizados.
+  - **Cyclomatic Complexity**: Alerta ante funciones con demasiados caminos de ejecución (> 10).
+  - **Naming Conventions**: Validación de `camelCase` vs `snake_case` según el framework (NestJS vs Django).
+
+---
+
+### `ml/` (v5.0.0 Pro - Local Intelligence)
+**Responsabilidad**: Inteligencia Artificial On-Device (Offline)
+
+- **`ml/embeddings.rs`**: Generador de vectores semánticos usando `candle-transformers` y el modelo `all-MiniLM-L6-v2`. Procesa el código localmente sin enviar datos a la nube.
+- **`ml/predictor.rs`**: Heurísticas asistidas por ML para predecir la probabilidad de bugs basada en la complejidad y cambios históricos.
+- **`ml/patterns/`**: Analizador de estilos de código para asegurar consistencia visual en el proyecto.
 
 ---
 

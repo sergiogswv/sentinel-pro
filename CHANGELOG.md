@@ -7,25 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [5.0.0-pro.beta.3] - 2026-02-20
 
-### 🚑 Smart Discovery & KB Auto-Healing (Fase 9)
-
-#### Infrastructure Resiliency
-- **Smart Project Discovery**: Sentinel now recursively searches for `.sentinelrc.toml` in parent directories and persists the "Active Project" globally. You can now run `sentinel` or `sentinel pro` from any subdirectory.
-- **KB Smart-Heal**: Automatic detection and recovery for Qdrant connection issues (especially HTTP/2 protocol errors on Windows). 
-- **Auto-Fix Persistence**: When a connection issue is resolved (e.g., swapping `localhost:6333` for `127.0.0.1:6334`), the updated configuration is automatically saved to the project's config file.
-- **Hot KB Reload**: Added `k` keyboard shortcut in monitor mode to trigger a KB connection retry and background re-initialization without restarting the process.
-
-#### Cross-Platform Parity
-- **Synchronized Installers**: Both `install.ps1` (Windows) and `install.sh` (Linux/macOS) now share the same feature set:
-  - Official `cargo install --path . --force` based installation for global availability.
-  - Automatic Qdrant binary download and setup (Support for x86_64 and ARM64/Apple Silicon).
-  - Automated `PATH` environment variable management.
-- **Improved gRPC defaults**: Default Qdrant URL updated to `http://127.0.0.1:6334` across all templates and migration scripts to ensure gRPC compatibility.
-
-#### Bug Fixes
-- Resolved `Default` trait collision in configuration modules.
-- Fixed missing `Duration` imports in the Pro command handling.
-- Improved URL parsing logic in the UI module to avoid external crate dependencies.
+### 🛡️ Quality Guardian & Standalone Indexing (Lite Refocus)
+- **Refocus del Proyecto**: Transición de un asistente de chat genérico a un **Guardián de Calidad** con análisis en dos capas (L1 Estático + L2 Semántico).
+- **Nuevo Motor de Indexación (SQLite)**: Eliminación de la dependencia obligatoria de Qdrant. Ahora el índice de símbolos y grafos de llamadas se gestiona mediante `rusqlite` en `.sentinel/index.db`.
+- **Análisis Estático de Capa 1 (Tree-sitter)**: Implementación de analizadores ultra-rápidos para Dead Code, Unused Imports, Complejidad Ciclomática y Convenciones de Nombres.
+- **Machine Learning Local**: Integración de `candle-transformers` para generación de embeddings local (`all-MiniLM-L6-v2`) 100% offline.
+- **Smart Discovery**: Búsqueda recursiva de configuración en directorios padres para trabajar cómodamente en sub-módulos.
+- **Auto-Healing KB**: Reparación automática de la base de datos de índices y herramientas de re-indexación rápida con la tecla `k`.
+- **Paridad de Instaladores**: Sincronización completa entre `install.sh` y `install.ps1`.
+  - Instalación global vía `cargo install --path . --force` para disponibilidad inmediata en terminal.
+  - Gestión automatizada de la variable de entorno `PATH`.
+  - Detección automática de arquitectura (x86_64, ARM64/Apple Silicon).
+#### Correciones de Errores (Fixes)
+- Corrección de bugs en el orquestador de agentes.
+- Mejora en la extracción de bloques de código multi-archivo.
+- Estabilización del sistema de métricas ROI.
+- Refuerzo en la detección de frameworks en sub-carpetas.
 
 ## [5.0.0-pro.beta.2] - 2026-02-19
 

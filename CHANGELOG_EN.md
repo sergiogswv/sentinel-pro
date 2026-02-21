@@ -5,6 +5,23 @@ All notable changes to Sentinel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0-pro.beta.3] - 2026-02-20
+
+### 🛡️ Quality Guardian & Standalone Indexing (Lite Refocus)
+- **Project Refocus**: Transitioned from a generic chat assistant to a **Quality Guardian** with two-layered analysis (L1 Static + L2 Semantic).
+- **New Indexing Engine (SQLite)**: Eliminated mandatory Qdrant dependency. Symbols and call graphs are now managed via `rusqlite` in `.sentinel/index.db`.
+- **Layer 1 Static Analysis (Tree-sitter)**: Ultra-fast analyzers for Dead Code, Unused Imports, Cyclomatic Complexity, and Naming Conventions.
+- **Local Machine Learning**: Integrated `candle-transformers` for 100% offline local embedding generation (`all-MiniLM-L6-v2`).
+- **Smart Discovery**: Recursive configuration search in parent directories for seamless sub-module support.
+- **Auto-Healing KB**: Automatic index database repair and fast re-indexing tools (hit `k` to refresh).
+- **Installer Parity**: Complete synchronization between `install.sh` and `install.ps1` for a unified experience across Linux/macOS and Windows.
+
+#### Bug Fixes
+- Resolved internal agent orchestrator race conditions.
+- Improved multi-file code block extraction for better suggestions.
+- Stabilized ROI metrics tracking for large-scale code audits.
+- Enhanced framework detection in nested directory structures.
+
 ## [5.0.0-pro.beta.2] - 2026-02-19
 
 ### 🔎 Project Audit & ROI System (Stage 8)

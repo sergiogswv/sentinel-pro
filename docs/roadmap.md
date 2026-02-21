@@ -7,22 +7,21 @@ Sentinel Pro's development roadmap, from its foundations to its future vision as
 
 - [x] **CLI Dispatcher**: Implementación con `clap` para subcomandos anidados (`sentinel pro <cmd>`).
 - [x] **Initial Commands**: Stubs para `analyze`, `generate`, `refactor`, `fix`, `chat`.
-- [x] **Configuración Pro**: Soporte para proveedores LLM locales (Ollama/LM Studio).
 - [x] **Framework Engine**: Detección automática de tecnología y carga de reglas YAML.
 
 **Release:** v5.0.0-pro (Stable)
 
 ---
 
-## Fase 2: Knowledge Base y Vector Store (Completada ✅)
-**Enfoque:** Cerebro local y búsqueda semántica avanzada.
+## Fase 2: Smart Indexing y Motor de Símbolos (Completada ✅)
+**Enfoque:** Cerebro local standalone y grafos de dependencia (Lite Refocus).
 
 - [x] **Tree-sitter Indexing**: Extracción de metadata multilingüe (funciones, clases, imports).
-- [x] **Qdrant Integration**: Setup de base de datos vectorial local.
-- [x] **Semantic RAG**: Integración de memoria semántica en los Agentes para mayor contexto.
-- [x] **Incremental Watching**: Actualización automática del índice al guardar archivos.
+- [x] **SQLite Integration**: Migración de Qdrant a `rusqlite` para mayor portabilidad y velocidad.
+- [x] **Structural Context**: Integración de memoria basada en grafos de llamadas en los Agentes.
+- [x] **Incremental Watching**: Actualización automática del índice al guardar archivos en tiempo real.
 
-**Release:** v5.0.0-pro.alpha.2
+**Release:** v5.0.0-pro.alpha.2 (Refocused in beta.3)
 
 ---
 
@@ -40,8 +39,8 @@ Sentinel Pro's development roadmap, from its foundations to its future vision as
 ## Fase 4: Machine Learning Local (On-Device) (Completada ✅)
 **Enfoque:** Privacidad y velocidad sin nube.
 
-- [x] **Embeddings Offline**: Integración de `candle-transformers` para indexación local.
-- [x] **Bug Prediction Stubs**: Preparación para modelos ONNX de análisis de complejidad.
+- [x] **Embeddings Offline**: Integración de `candle-transformers` con modelo `all-MiniLM-L6-v2`.
+- [x] **Bug Prediction**: Heurísticas asistidas por ML para predecir fallos basados en complejidad.
 - [x] **Code Style Analysis**: Generación automática de perfiles de estilo basados en el código existente.
 
 **Release:** v5.0.0-pro.alpha.4
@@ -65,9 +64,8 @@ Sentinel Pro's development roadmap, from its foundations to its future vision as
 - [x] **Workflow Engine**: Sistema para encadenar agentes de forma autónoma.
 - [x] **Workflows Predefinidos**: `fix-and-verify` (Fix + Refactor + Test), `review-security`.
 - [x] **Framework Migration**: Comando `migrate` para transiciones controladas de tecnología.
-- [x] **Architectural Audit**: Comando `review` para diagnósticos completos de salud.
 
-**Release:** v5.0.0-pro.alpha.4
+**Release:** v5.0.0-pro.beta.1
 
 ---
 
@@ -76,14 +74,35 @@ Sentinel Pro's development roadmap, from its foundations to its future vision as
 
 - [x] **Hardening & Security**: Prevención de Path Traversal y Sandboxing de Tests.
 - [x] **CI/CD Multi-plataforma**: GitHub Actions para auto-releases en Windows, Linux y macOS.
-- [x] **Testing Avanzado**: TesterAgent integrado con planes de prueba autónomos.
-- [x] **Documentation Website**: Setup oficial de `website` con Docusaurus.
+- [x] **TesterAgent**: Integración con planes de prueba autónomos y generación de especificaciones.
 
-**Release:** v5.0.0-pro.beta.1 (Actual)
+**Release:** v5.0.0-pro.beta.2
 
 ---
 
-## Fase 8: Monetización y Subscripciones (SaaS) (En Progreso 🚧)
+## Fase 8: Auditoría y Sistema ROI (Completada ✅)
+**Enfoque:** Escalabilidad de auditoría y medición de valor.
+
+- [x] **Project Audit**: Comando `pro audit <path>` con selección múltiple de fixes.
+- [x] **ROI Accounting**: Tracking de tiempo ahorrado y costos de tokens en tiempo real.
+- [x] **METRICS_SYSTEM.md**: Documentación técnica del sistema de valor aportado.
+
+**Release:** v5.0.0-pro.beta.2
+
+---
+
+## Fase 9: Refocus: Quality Guardian y Smart Discovery (Completada ✅)
+**Enfoque:** Resiliencia de infraestructura y análisis protector.
+
+- [x] **Static Analysis L1**: Analizadores de código muerto, complejidad y nombres (Tree-sitter).
+- [x] **Smart Discovery**: Búsqueda recursiva de configuración en directorios padres.
+- [x] **SQLite KB**: Sustitución de Qdrant por SQLite para una experiencia "zero-config".
+
+**Release:** v5.0.0-pro.beta.3
+
+---
+
+## Fase 10: Monetización y Subscripciones (SaaS) (En Progreso 🚧)
 **Enfoque:** Modelo de negocio comercial y licenciamiento.
 
 - [ ] **Licenciamiento Core**: Validación criptográfica local de llaves RSA/Ed25519.
@@ -97,20 +116,13 @@ Sentinel Pro's development roadmap, from its foundations to its future vision as
 
 ## 🔮 Futuro y Visión (Roadmap Extendido)
 
-### 🔒 SecOps Guardián (Fase 9)
+### 🔒 SecOps Guardián (Fase 11)
 - Escaneo de secretos basado en entropía.
 - Auditoría automática de vulnerabilidades en dependencias.
-- Sanitización de DTOs y prevención de SQL Injection automática.
 
-### 🔍 PR Mode (Fase 10)
+### 🔍 PR Mode (Fase 12)
 - Integración nativa con GitHub/GitLab Pull Requests.
 - Comentarios automáticos de revisión línea por línea.
-- Bloqueo de merges si no se cumplen los estándares arquitectónicos.
-
-### 🚀 Enterprise (Fase 11)
-- Modo Daemon/Servicio con dashboard web centralizado.
-- Soporte para equipos grandes con configuraciones compartidas en la nube.
-- Integración con Jira / Linear para gestión de tickets automática.
 
 ---
 
@@ -120,12 +132,12 @@ Sentinel Pro's development roadmap, from its foundations to its future vision as
 |---------|-------|---------|--------|
 | v4.5.0 | Feb 2025 | Multi-model AI & Framework Detection | ✅ Stable |
 | v5.0.0-pro | Feb 2025 | Sentinel Pro Infrastructure & Local AI | ✅ Stable |
-| v5.0.0-pro.alpha.4 | Feb 2025 | Workflow Engine & Multi-Agent System | ✅ Stable |
-| **v5.0.0-pro.beta.1** | **Feb 2025** | **Quality Hardening & Multi-platform CI/CD** | **✅ Actual** |
+| v5.0.0-pro.beta.1 | Feb 2025 | Workflow Engine & Multi-Agent System | ✅ Stable |
+| v5.0.0-pro.beta.2 | Feb 2025 | Auditoría & Sistema ROI | ✅ Stable |
+| **v5.0.0-pro.beta.3** | **Feb 2025** | **Quality Guardian & SQLite KB (Refocus)** | **✅ Actual** |
 | v5.1.0-pro | Q2 2025 | Monetization & Licensing System | 📋 Planned |
-| v6.0.0-pro | Q3 2025 | SecOps & Automated Security Audits | 📋 Planned |
 
 ---
 
-**Current Release:** v5.0.0-pro.beta.1  
-**Last Update:** Febrero 2025
+**Current Release:** v5.0.0-pro.beta.3  
+**Last Update:** Febrero 20, 2026

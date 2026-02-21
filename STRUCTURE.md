@@ -13,19 +13,26 @@ src/
 │   ├── mod.rs           # Definition and re-exports
 │   ├── client.rs        # AI Clients (Anthropic, Gemini, Ollama, OpenAI)
 │   └── ...
-├── kb/            # Knowledge Base Module (Stage 2)
+├── index/         # Intelligent Indexing Module (SQLite)
 │   ├── mod.rs           # Module definition and re-exports
-│   ├── indexer.rs       # Code indexing with Tree-sitter
-│   ├── vector_db.rs     # Vector database client (Qdrant)
-│   ├── context.rs       # Semantic context builder
-│   └── manager.rs       # Background indexing orchestrator
+│   ├── db.rs            # Local database (rusqlite)
+│   ├── builder.rs       # Project indexing orchestrator
+│   └── ...
+├── rules/         # Quality Guardian Engine
+│   ├── mod.rs           # Rule definitions (Static + Semantic)
+│   ├── engine.rs        # Orchestration layer
+│   └── static_analysis.rs # Tree-sitter analyzers (Complexity, Dead code)
+├── ml/            # Local Machine Learning (Off-device IA)
+│   ├── mod.rs           # Module definition
+│   ├── embeddings.rs    # Local BERT embeddings (Candle)
+│   └── predictor.rs     # Bug probability prediction
+├── agents/        # Multi-Agent Orchestrator
+│   ├── mod.rs           # Orchestrator and Agent trait
+│   └── ... (specialized agents)
 ├── commands/      # CLI Command handlers (v5.0.0 Pro)
 │   ├── mod.rs           # Cli & Commands definitions
 │   ├── monitor.rs       # Monitor mode logic
 │   └── pro.rs           # Pro command implementations
-├── rules/         # Architecture Rules Engine (v5.0.0 Pro)
-│   ├── mod.rs           # YAML structure definitions
-│   └── engine.rs        # Static validation engine
 ├── config.rs      # Pro configuration management
 ├── docs.rs        # Documentation generation
 └── ...
@@ -211,43 +218,37 @@ The AI module has been refactored into specialized submodules for better maintai
 
 ---
 
-### `kb/` (v5.0.0 Pro - Stage 2)
-**Responsibility**: Local Knowledge Base Management
+### `index/` (v5.0.0 Pro - Lite Refocus)
+**Responsability**: Project Index Management (Standalone)
 
-Module in charge of indexing source code and providing semantic context to the AI.
+Replaces the old Qdrant-based system with a local SQLite database (`rusqlite`) for enhanced speed, portability, and zero-configuration setups.
 
-#### `kb/indexer.rs`
-**Responsibility**: Syntactic analysis and symbol extraction
-- Uses `tree-sitter` to parse TypeScript/JavaScript code.
-- Extracts classes, functions, methods, and interfaces.
-- Generates syntactic summaries for indexing.
-
-#### `kb/vector_db.rs`
-**Responsibility**: Vector database management (Qdrant)
-- Initializes collections in Qdrant.
-- Stores code embeddings with metadata (path, lines, content).
-- Performs vector similarity searches.
-
-#### `kb/context.rs`
-**Responsibility**: Semantic context construction
-- Generates embeddings for user queries or code changes.
-- Retrieves the most relevant code snippets from the Vector DB.
-- Formats the context for injection into AI prompts.
-
-#### `kb/manager.rs`
-**Responsibility**: Orchestration and background processes
-- Manages the initial indexing of the entire project.
-- Processes incremental updates in the background (via Tokio mpsc).
-- Coordinates batch embedding generation to optimize API usage.
+- **`index/db.rs`**: Database schema for symbols, call graphs, quality history, and project-wide dependencies.
+- **`index/builder.rs`**: Orchestrator for full project scanning and incremental background updates.
+- **`index/symbol_table.rs`**: Structured storage for class, method, and interface definitions.
+- **`index/call_graph.rs`**: Mapping of inter-file connections for high-fidelity impact analysis.
+- **`index/quality_history.rs`**: Persistence of quality metrics over time to visualize technical debt trends.
 
 ---
 
-### `rules/` (v5.0.0 Pro)
-**Responsibility**: YAML-based architecture rules engine
+### `rules/` (v5.0.0 Pro - Quality Guardian)
+**Responsibility**: Rules Engine and Layer 1 Static Analysis
 
-**Modules**:
-- `rules/mod.rs`: Data structures for `FrameworkDefinition` and `FrameworkRule`.
-- `rules/engine.rs`: Implements `RuleEngine` for pre-AI static validation.
+- **`rules/engine.rs`**: Orchestrator that combines hardcoded static rules (Tree-sitter) with custom architecture rules defined in YAML (`.sentinel/rules.yaml`).
+- **`rules/static_analysis.rs`**: High-performance analyzers implementation:
+  - **Dead Code**: Detection of variables and functions declared but never used.
+  - **Unused Imports**: Automated cleanup of unused library references.
+  - **Cyclomatic Complexity**: Alerting functions with too many execution branches (> 10).
+  - **Naming Conventions**: Enforcing `camelCase` vs `snake_case` based on the framework (e.g., NestJS vs Django).
+
+---
+
+### `ml/` (v5.0.0 Pro - Local Intelligence)
+**Responsibility**: On-Device Artificial Intelligence (Offline Capable)
+
+- **`ml/embeddings.rs`**: Semantic vector generator utilizing `candle-transformers` and the `all-MiniLM-L6-v2` model. Processes code entirely locally without cloud uploads.
+- **`ml/predictor.rs`**: ML-assisted heuristics for predicting bug probability based on code complexity and historical change patterns.
+- **`ml/patterns/`**: Code style analyzer to ensure visual consistency across the codebase.
 
 ---
 

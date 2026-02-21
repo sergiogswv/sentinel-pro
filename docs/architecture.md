@@ -125,31 +125,19 @@ loop {
 
 ---
 
-## Main Components
-
 | Component | Module | Description |
 |-----------|--------|-------------|
-| `detectar_archivo_padre()` | `files` | Detects if a modified file is a child of a parent module (e.g., `.service.ts`) |
+| `IndexDb` | `index::db` | SQLite-based storage for symbols, call graphs, and quality history |
+| `RuleEngine` | `rules::engine` | Orchestrates Phase 1 (Static) and Phase 2 (Semantic) validations |
+| `StaticAnalyzer` | `rules::static_analysis` | Tree-sitter powered analyzers (Dead code, Complexity, Naming) |
+| `EmbeddingModel` | `ml::embeddings` | Local BERT transformer for on-device semantic vector generation |
+| `AgentOrchestrator` | `agents` | Manages concurrent autonomous agents (Coder, Reviewer, Tester) |
 | `consultar_ia_dinamico()` | `ai::client` | Intelligent system with cache, fallback, and multi-provider support |
-| `consultar_ia()` | `ai::client` | Direct communication with AI APIs (Anthropic, Gemini, etc.) |
-| `ejecutar_con_fallback()` | `ai::client` | Executes query with primary model and automatic fallback |
-| `intentar_leer_cache()` | `ai::cache` | Attempts to read cached AI response |
-| `guardar_en_cache()` | `ai::cache` | Saves AI response to cache |
-| `limpiar_cache()` | `ai::cache` | Clears all cached responses |
-| `detectar_framework_con_ia()` | `ai::framework` | Auto-detects framework using AI analysis |
-| `listar_modelos_gemini()` | `ai::framework` | Retrieves list of available Gemini models |
 | `analizar_arquitectura()` | `ai::analysis` | Code evaluation based on framework-specific rules |
-| `extraer_codigo()` | `ai::utils` | Extracts code blocks from AI markdown responses |
-| `eliminar_bloques_codigo()` | `ai::utils` | Removes code blocks, keeps explanatory text |
-| `ejecutar_tests()` | `tests` | Jest test execution with visible console output |
-| `pedir_ayuda_test()` | `tests` | Diagnosis of failures with AI |
+| `ejecutar_tests()` | `tests` | Jest/Pytest execution with visible console output |
 | `actualizar_documentacion()` | `docs` | Generates ".md pocket manual" next to each file |
-| `generar_mensaje_commit()` | `git` | Generation of messages following Conventional Commits |
-| `preguntar_commit()` | `git` | Executes commit if user accepts |
-| `obtener_resumen_git()` | `git` | Gets commits from the day using git log |
-| `generar_reporte_diario()` | `git` | Creates productivity report with AI based on commits |
-| `SentinelStats` | `stats` | Management of persistent metrics and statistics |
-| `SentinelConfig` | `config` | Project configuration (.sentinelrc.toml) |
+| `SentinelStats` | `stats` | Management of persistent metrics and ROI tracking |
+| `SentinelConfig` | `config` | Project configuration management |
 
 ---
 
@@ -355,26 +343,19 @@ Test executed: test/calls/calls.spec.ts (parent module test)
 ```
 sentinel-rust/
 ├── src/
-│   ├── main.rs           # Entry point, main loop
-│   ├── ai/               # AI integration module (v4.4.3 modularized)
-│   │   ├── mod.rs              # Module definition and public re-exports
-│   │   ├── cache.rs            # Response caching system
-│   │   ├── client.rs           # Multi-provider API communication
-│   │   ├── framework.rs        # Framework auto-detection with AI
-│   │   ├── analysis.rs         # Architecture analysis engine
-│   │   └── utils.rs            # Response processing utilities
+│   ├── main.rs           # Entry point
+│   ├── index/            # SQLite indexing system
+│   ├── rules/            # Quality Guardian engine (Static + YAML)
+│   ├── ml/               # Local IA (Embeddings, Predictors)
+│   ├── agents/           # Multi-agent orchestrator
+│   ├── ai/               # AI clients and caching
+│   ├── commands/         # CLI handlers (Pro & Base)
 │   ├── config.rs         # Configuration management
-│   ├── stats.rs          # Metrics tracking
-│   ├── tests.rs          # Test execution
-│   ├── git.rs            # Git operations
-│   ├── docs.rs           # Documentation generation
-│   ├── files.rs          # Parent file detection utilities
-│   └── ui.rs             # User interface and prompts
-├── target/
-│   └── release/
-│       └── sentinel-rust # Compiled binary
-└── .sentinel/
-    └── cache/            # AI response cache
+│   ├── stats.rs          # ROI & Metrics
+│   └── ui.rs             # Progres bars and banners
+├── .sentinel/
+│   ├── index.db          # Standalone SQLite Knowledge Base
+│   └── cache/            # AI response cache
 ```
 
 ---
