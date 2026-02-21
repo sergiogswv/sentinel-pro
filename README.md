@@ -186,7 +186,6 @@ Phase 6: ✅ Completed - Standalone Knowledge Base & Structural Indexing (v5.0.0
 Phase 7: ✅ Completed - AI Multi-Agent System (Architect, QA, Dev) (v5.0.0-pro.beta.1)
 Phase 8: ✅ Completed - Project Audit & ROI System (v5.0.0-pro.beta.2)
 Phase 9: ✅ Completed - Refocus: Quality Guardian, Static Analysis & SQLite KB (v5.0.0-pro.beta.3)
-Phase 10: 📅 Planned - Monetization & Licensing (SaaS)
 ```
 
 [View complete roadmap →](docs/roadmap.md)
@@ -195,14 +194,13 @@ Phase 10: 📅 Planned - Monetization & Licensing (SaaS)
 
 ## License
 Sentinel Pro is licensed under [AGPL-3.0](LICENSE).
-For commercial licensing, contact: tu@email.com
+For commercial licensing, contact: sergio.gs8925@gmail.com
 
 ---
 
 ## 👤 Author
 
 **Sergio Guadarrama**
-**sergio.gs8925@gmail.com**
 
 ---
 
