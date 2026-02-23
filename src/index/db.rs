@@ -118,4 +118,48 @@ impl IndexDb {
             .lock()
             .expect("Failed to lock database connection")
     }
+
+    /// Returns true if the call_graph table has been populated (i.e., `sentinel monitor` has run).
+    pub fn is_populated(&self) -> bool {
+        let conn = self.lock();
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM call_graph LIMIT 1)",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|v| v == 1)
+        .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    fn make_db() -> (NamedTempFile, IndexDb) {
+        let f = NamedTempFile::new().unwrap();
+        let db = IndexDb::open(f.path()).unwrap();
+        (f, db)
+    }
+
+    #[test]
+    fn test_is_populated_false_when_empty() {
+        let (_f, db) = make_db();
+        assert!(!db.is_populated());
+    }
+
+    #[test]
+    fn test_is_populated_true_after_call_graph_insert() {
+        let (_f, db) = make_db();
+        {
+            let conn = db.lock();
+            conn.execute(
+                "INSERT INTO call_graph (caller_file, caller_symbol, callee_symbol) VALUES (?, ?, ?)",
+                rusqlite::params!["src/a.ts", "funcA", "funcB"],
+            )
+            .unwrap();
+        }
+        assert!(db.is_populated());
+    }
 }

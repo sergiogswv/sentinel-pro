@@ -36,6 +36,65 @@ struct ReviewSuggestion {
     files_involved: Vec<String>,
 }
 
+/// Groups files into batches for audit LLM calls.
+///
+/// Groups by `(parent_dir, module_prefix)` to keep semantically related files together.
+/// `module_prefix` is the filename stem before the first dot: `user.service.ts` → `user`.
+/// Splits groups exceeding `max_files_per_batch` or `max_lines_per_batch`.
+pub fn build_audit_batches(
+    files: &[std::path::PathBuf],
+    max_files_per_batch: usize,
+    max_lines_per_batch: usize,
+) -> Vec<Vec<std::path::PathBuf>> {
+    use std::collections::HashMap;
+
+    fn module_prefix(path: &std::path::Path) -> String {
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.split('.').next())
+            .unwrap_or("")
+            .to_string()
+    }
+
+    // Group by (parent_dir, module_prefix) — keeps user.service.ts + user.controller.ts together
+    let mut groups: HashMap<(std::path::PathBuf, String), Vec<std::path::PathBuf>> =
+        HashMap::new();
+    for f in files {
+        let parent = f.parent().unwrap_or(f.as_path()).to_path_buf();
+        let prefix = module_prefix(f);
+        groups.entry((parent, prefix)).or_default().push(f.clone());
+    }
+
+    // Split each group by file count and line count caps (sorted for deterministic output)
+    let mut sorted_groups: Vec<_> = groups.into_iter().collect();
+    sorted_groups.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    let mut final_batches: Vec<Vec<std::path::PathBuf>> = Vec::new();
+    for (_, group_files) in sorted_groups {
+        let mut current_batch: Vec<std::path::PathBuf> = Vec::new();
+        let mut current_lines = 0usize;
+        for f in group_files {
+            let file_lines = std::fs::read_to_string(&f)
+                .map(|c| c.lines().count())
+                .unwrap_or(0);
+            if !current_batch.is_empty()
+                && (current_batch.len() >= max_files_per_batch
+                    || current_lines + file_lines > max_lines_per_batch)
+            {
+                final_batches.push(current_batch);
+                current_batch = Vec::new();
+                current_lines = 0;
+            }
+            current_batch.push(f);
+            current_lines += file_lines;
+        }
+        if !current_batch.is_empty() {
+            final_batches.push(current_batch);
+        }
+    }
+
+    final_batches
+}
+
 pub fn handle_pro_command(subcommand: ProCommands) {
     // Buscar la raíz del proyecto inteligentemente
     let project_root = SentinelConfig::find_project_root()
@@ -128,7 +187,15 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
             if files_to_check.is_empty() {
                 if json_mode {
-                    println!("{{\"checked\":0,\"errors\":0,\"warnings\":0,\"infos\":0,\"issues\":[]}}");
+                    let index_populated = agent_context
+                        .index_db
+                        .as_ref()
+                        .map(|db| db.is_populated())
+                        .unwrap_or(false);
+                    println!(
+                        "{{\"checked\":0,\"errors\":0,\"warnings\":0,\"infos\":0,\"index_populated\":{},\"issues\":[]}}",
+                        index_populated
+                    );
                 } else {
                     println!("{} No se encontraron archivos para revisar en '{}'.", "⚠️".yellow(), target);
                 }
@@ -136,6 +203,41 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             }
 
             if !json_mode {
+                // Cold-start warning: shown once if index has never been populated
+                let cold_start = agent_context
+                    .index_db
+                    .as_ref()
+                    .map(|db| !db.is_populated())
+                    .unwrap_or(false);
+                if cold_start {
+                    println!(
+                        "\n{} {}",
+                        "⚠️  ÍNDICE VACÍO —".yellow().bold(),
+                        "Ejecuta `sentinel monitor` primero para análisis cross-file completo.".yellow()
+                    );
+                    println!(
+                        "   {}\n",
+                        "Continuando con análisis de archivo único...".yellow()
+                    );
+                }
+
+                // TS-first note: only shown when index is ready (cold-start takes priority)
+                if !cold_start {
+                    let has_ts_js = files_to_check.iter().any(|f| {
+                        matches!(
+                            f.extension().and_then(|e| e.to_str()),
+                            Some("ts" | "js" | "tsx" | "jsx")
+                        )
+                    });
+                    if !has_ts_js {
+                        println!(
+                            "ℹ️  Análisis estático optimizado para TypeScript/JavaScript."
+                        );
+                        println!(
+                            "   Soporte para Go, Python, Rust, Java y otros lenguajes: próxima versión.\n"
+                        );
+                    }
+                }
                 println!("\n{} Capa 1 — Análisis Estático en {} archivo(s)...",
                     "⚡".cyan(), files_to_check.len());
             }
@@ -213,13 +315,20 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     errors: usize,
                     warnings: usize,
                     infos: usize,
+                    index_populated: bool,
                     issues: Vec<JsonIssue>,
                 }
+                let index_populated = agent_context
+                    .index_db
+                    .as_ref()
+                    .map(|db| db.is_populated())
+                    .unwrap_or(false);
                 let out = JsonOutput {
                     checked: files_to_check.len(),
                     errors: n_errors,
                     warnings: n_warnings,
                     infos: n_infos,
+                    index_populated,
                     issues: json_issues,
                 };
                 println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
@@ -1316,6 +1425,22 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             }
         }
         ProCommands::Review => {
+            // Review has no --format flag; always terminal output, no json_mode guard needed.
+            // Cold-start warning: shown once if index has never been populated
+            if let Some(ref db) = agent_context.index_db {
+                if !db.is_populated() {
+                    println!(
+                        "\n{} {}",
+                        "⚠️  ÍNDICE VACÍO —".yellow().bold(),
+                        "Ejecuta `sentinel monitor` primero para análisis cross-file completo.".yellow()
+                    );
+                    println!(
+                        "   {}\n",
+                        "Continuando con análisis de archivo único...".yellow()
+                    );
+                }
+            }
+
             let pb = ui::crear_progreso("Analizando estructura del proyecto...");
 
             // 1. Generar mapa del proyecto (Tree)
@@ -1702,6 +1827,24 @@ pub fn handle_pro_command(subcommand: ProCommands) {
         ProCommands::Audit { target, no_fix, format, max_files } => {
             let json_mode = format.to_lowercase() == "json";
             let non_interactive = no_fix || json_mode;
+
+            // Cold-start warning: shown once if index has never been populated
+            if !json_mode {
+                if let Some(ref db) = agent_context.index_db {
+                    if !db.is_populated() {
+                        println!(
+                            "\n{} {}",
+                            "⚠️  ÍNDICE VACÍO —".yellow().bold(),
+                            "Ejecuta `sentinel monitor` primero para análisis cross-file completo.".yellow()
+                        );
+                        println!(
+                            "   {}\n",
+                            "Continuando con análisis de archivo único...".yellow()
+                        );
+                    }
+                }
+            }
+
             let path = agent_context.project_root.join(&target);
             if !path.exists() {
                 println!("{} El destino '{}' no existe en el proyecto.", "❌".red(), target);
@@ -1769,41 +1912,10 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             let mut all_issues: Vec<AuditIssue> = Vec::new();
             let mut parse_failures = 0usize;
 
-            // Agrupar archivos por directorio-módulo para batching
-            use std::collections::HashMap;
-            let mut module_batches: HashMap<std::path::PathBuf, Vec<std::path::PathBuf>> = HashMap::new();
-            for f in &files_to_audit {
-                let parent = f.parent().unwrap_or(f.as_path()).to_path_buf();
-                module_batches.entry(parent).or_default().push(f.clone());
-            }
-
-            // Dividir batches grandes (>8 archivos o >800 líneas) en sub-batches
+            // Agrupar archivos por módulo para batching (parent_dir + module_prefix)
             const MAX_FILES_PER_BATCH: usize = 8;
             const MAX_LINES_PER_BATCH: usize = 800;
-
-            let mut final_batches: Vec<Vec<std::path::PathBuf>> = Vec::new();
-            for (_, files) in module_batches {
-                let mut current_batch: Vec<std::path::PathBuf> = Vec::new();
-                let mut current_lines = 0usize;
-                for f in files {
-                    let file_lines = std::fs::read_to_string(&f)
-                        .map(|c| c.lines().count())
-                        .unwrap_or(0);
-                    if !current_batch.is_empty()
-                        && (current_batch.len() >= MAX_FILES_PER_BATCH
-                            || current_lines + file_lines > MAX_LINES_PER_BATCH)
-                    {
-                        final_batches.push(current_batch);
-                        current_batch = Vec::new();
-                        current_lines = 0;
-                    }
-                    current_batch.push(f);
-                    current_lines += file_lines;
-                }
-                if !current_batch.is_empty() {
-                    final_batches.push(current_batch);
-                }
-            }
+            let final_batches = build_audit_batches(&files_to_audit, MAX_FILES_PER_BATCH, MAX_LINES_PER_BATCH);
 
             let total_batches = final_batches.len();
 
@@ -2102,5 +2214,73 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
             println!("\n✨ Proceso de auditoría y corrección finalizado.");
         }
+    }
+}
+
+#[cfg(test)]
+mod batching_tests {
+    use super::build_audit_batches;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn write_file(dir: &TempDir, name: &str) -> PathBuf {
+        let path = dir.path().join(name);
+        std::fs::write(&path, "x\n").unwrap();
+        path
+    }
+
+    #[test]
+    fn test_batch_groups_by_parent_dir() {
+        let dir = TempDir::new().unwrap();
+        let users_dir = dir.path().join("users");
+        let auth_dir = dir.path().join("auth");
+        std::fs::create_dir_all(&users_dir).unwrap();
+        std::fs::create_dir_all(&auth_dir).unwrap();
+
+        let f1 = {
+            let p = users_dir.join("user.service.ts");
+            std::fs::write(&p, "x\n").unwrap();
+            p
+        };
+        let f2 = {
+            let p = auth_dir.join("auth.service.ts");
+            std::fs::write(&p, "x\n").unwrap();
+            p
+        };
+
+        let batches = build_audit_batches(&[f1, f2], 8, 800);
+        assert_eq!(batches.len(), 2, "files in different dirs must be in different batches");
+    }
+
+    #[test]
+    fn test_batch_splits_large_group() {
+        let dir = TempDir::new().unwrap();
+        // 10 files with same prefix "module" → same group → splits at 8
+        let files: Vec<PathBuf> = (0..10)
+            .map(|i| write_file(&dir, &format!("module.part{}.ts", i)))
+            .collect();
+
+        let batches = build_audit_batches(&files, 8, 800);
+        assert_eq!(batches.len(), 2, "10 files same prefix → 2 batches (8 + 2)");
+        assert!(batches[0].len() <= 8);
+        assert!(batches[1].len() <= 8);
+    }
+
+    #[test]
+    fn test_batch_flat_project_prefix_grouping() {
+        let dir = TempDir::new().unwrap();
+        // All files in same directory but different module prefixes
+        let f_user_svc  = write_file(&dir, "user.service.ts");
+        let f_user_ctrl = write_file(&dir, "user.controller.ts");
+        let f_auth_svc  = write_file(&dir, "auth.service.ts");
+
+        let batches = build_audit_batches(&[f_user_svc, f_user_ctrl, f_auth_svc], 8, 800);
+        assert_eq!(batches.len(), 2, "user.* and auth.* must be in separate batches");
+
+        let user_batch = batches
+            .iter()
+            .find(|b| b.iter().any(|f| f.file_name().unwrap().to_str().unwrap().starts_with("user.")))
+            .expect("user batch not found");
+        assert_eq!(user_batch.len(), 2, "user batch must have both user.* files");
     }
 }
