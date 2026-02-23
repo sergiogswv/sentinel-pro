@@ -1699,7 +1699,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
             }
         }
-        ProCommands::Audit { target, no_fix, format } => {
+        ProCommands::Audit { target, no_fix, format, max_files } => {
             let json_mode = format.to_lowercase() == "json";
             let non_interactive = no_fix || json_mode;
             let path = agent_context.project_root.join(&target);
@@ -1742,6 +1742,24 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 return;
             }
 
+            // Seleccionar los archivos más recientes hasta max_files
+            let total_found = files_to_audit.len();
+            if total_found > max_files {
+                files_to_audit.sort_by_key(|p| {
+                    std::fs::metadata(p)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+                });
+                files_to_audit.reverse(); // newest first
+                files_to_audit.truncate(max_files);
+                if !json_mode {
+                    println!(
+                        "   ℹ️  Auditando {} de {} archivos (usa --max-files {} para todos)",
+                        max_files, total_found, total_found
+                    );
+                }
+            }
+
             if !json_mode {
                 println!(
                     "🔍 Iniciando Auditoría en {} archivo(s)...",
@@ -1751,46 +1769,98 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             let mut all_issues: Vec<AuditIssue> = Vec::new();
             let mut parse_failures = 0usize;
 
-            for (i, file_path) in files_to_audit.iter().enumerate() {
-                let rel_path = file_path
-                    .strip_prefix(&agent_context.project_root)
-                    .unwrap_or(file_path);
+            // Agrupar archivos por directorio-módulo para batching
+            use std::collections::HashMap;
+            let mut module_batches: HashMap<std::path::PathBuf, Vec<std::path::PathBuf>> = HashMap::new();
+            for f in &files_to_audit {
+                let parent = f.parent().unwrap_or(f.as_path()).to_path_buf();
+                module_batches.entry(parent).or_default().push(f.clone());
+            }
+
+            // Dividir batches grandes (>8 archivos o >800 líneas) en sub-batches
+            const MAX_FILES_PER_BATCH: usize = 8;
+            const MAX_LINES_PER_BATCH: usize = 800;
+
+            let mut final_batches: Vec<Vec<std::path::PathBuf>> = Vec::new();
+            for (_, files) in module_batches {
+                let mut current_batch: Vec<std::path::PathBuf> = Vec::new();
+                let mut current_lines = 0usize;
+                for f in files {
+                    let file_lines = std::fs::read_to_string(&f)
+                        .map(|c| c.lines().count())
+                        .unwrap_or(0);
+                    if !current_batch.is_empty()
+                        && (current_batch.len() >= MAX_FILES_PER_BATCH
+                            || current_lines + file_lines > MAX_LINES_PER_BATCH)
+                    {
+                        final_batches.push(current_batch);
+                        current_batch = Vec::new();
+                        current_lines = 0;
+                    }
+                    current_batch.push(f);
+                    current_lines += file_lines;
+                }
+                if !current_batch.is_empty() {
+                    final_batches.push(current_batch);
+                }
+            }
+
+            let total_batches = final_batches.len();
+
+            for (batch_idx, batch_files) in final_batches.iter().enumerate() {
+                // Construir contexto multi-archivo para el batch
+                let mut batch_context = String::new();
+                let mut batch_rel_paths: Vec<String> = Vec::new();
+
+                for file_path in batch_files {
+                    let rel_path = file_path
+                        .strip_prefix(&agent_context.project_root)
+                        .unwrap_or(file_path);
+                    let content = std::fs::read_to_string(file_path).unwrap_or_default();
+                    batch_context.push_str(&format!("\n\n=== {} ===\n{}", rel_path.display(), content));
+                    batch_rel_paths.push(rel_path.display().to_string());
+                }
+
+                let module_name = batch_files.first()
+                    .and_then(|f| f.parent())
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "módulo".to_string());
+
                 let pb = if !json_mode {
                     ui::crear_progreso(&format!(
-                        "[{}/{}] Auditando {}...",
-                        i + 1,
-                        files_to_audit.len(),
-                        rel_path.display()
+                        "[{}/{}] Auditando módulo '{}' ({} archivo(s))...",
+                        batch_idx + 1,
+                        total_batches,
+                        module_name,
+                        batch_files.len()
                     ))
                 } else {
                     indicatif::ProgressBar::hidden()
                 };
 
-                let content = std::fs::read_to_string(file_path).unwrap_or_default();
-
-                // IMPORTANTE: la instrucción JSON va en `description` (no en `context`) para que
-                // ReviewerAgent detecte la keyword "JSON" y NO agregue el bloque FORMATO DE RESPUESTA
-                // que anularía la instrucción JSON-only.
                 let task = Task {
                     id: uuid::Uuid::new_v4().to_string(),
                     description: format!(
-                        "Realiza una auditoría técnica del archivo '{}'.\n\
+                        "Realiza una auditoría técnica de MÚLTIPLES archivos del módulo '{}'.\n\
+                        ARCHIVOS INCLUIDOS: {}\n\
                         OBJETIVO: Identificar problemas de calidad, seguridad o bugs CORREGIBLES.\n\
                         REGLAS:\n\
-                        1. Analiza el código y genera un array JSON con los problemas encontrados.\n\
-                        2. Cada objeto DEBE tener exactamente estos campos: title, description, severity (High/Medium/Low), suggested_fix.\n\
-                        3. Responde ÚNICAMENTE con el bloque ```json — sin texto introductorio ni explicaciones adicionales.\n\
+                        1. Analiza TODOS los archivos y genera un array JSON con los problemas.\n\
+                        2. Cada objeto DEBE tener: title, description, severity (High/Medium/Low), suggested_fix, file_path (nombre del archivo al que pertenece el issue).\n\
+                        3. Responde ÚNICAMENTE con el bloque ```json — sin texto introductorio.\n\
                         FORMATO JSON REQUERIDO:\n\
                         ```json\n\
                         [\n\
-                          {{\"title\": \"...\", \"description\": \"...\", \"severity\": \"High|Medium|Low\", \"suggested_fix\": \"...\"}}\n\
+                          {{\"title\": \"...\", \"description\": \"...\", \"severity\": \"High|Medium|Low\", \"suggested_fix\": \"...\", \"file_path\": \"nombre-del-archivo.ts\"}}\n\
                         ]\n\
                         ```",
-                        rel_path.display()
+                        module_name,
+                        batch_rel_paths.join(", ")
                     ),
                     task_type: TaskType::Analyze,
-                    file_path: Some(file_path.clone()),
-                    context: Some(content),
+                    file_path: batch_files.first().cloned(),
+                    context: Some(batch_context),
                 };
 
                 match rt.block_on(orchestrator.execute_task("ReviewerAgent", &task, &agent_context)) {
@@ -1799,7 +1869,23 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                         match serde_json::from_str::<Vec<AuditIssue>>(&json_str) {
                             Ok(mut issues) => {
                                 for issue in &mut issues {
-                                    issue.file_path = file_path.to_string_lossy().to_string();
+                                    // Normalizar file_path: buscar el archivo del batch que coincida
+                                    let matched_path = batch_files.iter()
+                                        .find(|f| {
+                                            f.to_string_lossy().contains(&issue.file_path)
+                                            || issue.file_path.contains(
+                                                &f.file_name()
+                                                    .map(|n| n.to_string_lossy().to_string())
+                                                    .unwrap_or_default()
+                                            )
+                                        })
+                                        .map(|f| f.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| {
+                                            batch_files.first()
+                                                .map(|f| f.to_string_lossy().to_string())
+                                                .unwrap_or_default()
+                                        });
+                                    issue.file_path = matched_path;
                                     all_issues.push(issue.clone());
                                 }
                             }
@@ -1808,8 +1894,8 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                                 pb.finish_and_clear();
                                 if !json_mode {
                                     println!(
-                                        "   ⚠️  {}: el AI no devolvió JSON válido — archivo saltado.",
-                                        rel_path.display().to_string().yellow()
+                                        "   ⚠️  Módulo '{}': el AI no devolvió JSON válido — saltado.",
+                                        module_name.yellow()
                                     );
                                 }
                                 continue;
@@ -1820,7 +1906,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                         parse_failures += 1;
                         pb.finish_and_clear();
                         if !json_mode {
-                            println!("   ❌ Error auditando {}: {}", rel_path.display(), e);
+                            println!("   ❌ Error auditando módulo '{}': {}", module_name, e);
                         }
                         continue;
                     }

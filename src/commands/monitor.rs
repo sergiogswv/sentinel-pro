@@ -134,6 +134,7 @@ pub fn start_monitor() {
                                 target: final_path.to_string(),
                                 no_fix: false,
                                 format: "text".to_string(),
+                                max_files: 20,
                             },
                         );
                         println!("✅ Auditoría terminada. Volviendo a monitorear...\n");

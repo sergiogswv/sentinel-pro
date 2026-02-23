@@ -39,6 +39,19 @@ impl<'a> CallGraph<'a> {
 
         Ok(results)
     }
+
+    /// Returns true if `symbol` is called from any file OTHER than `file_path`.
+    /// Used to suppress DEAD_CODE false positives for cross-file symbols.
+    pub fn is_called_from_other_file(&self, symbol: &str, file_path: &str) -> bool {
+        let conn = self.db.lock();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM call_graph \
+             WHERE callee_symbol = ? AND caller_file != ?",
+            rusqlite::params![symbol, file_path],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        count > 0
+    }
 }
 
 #[cfg(test)]
@@ -67,5 +80,13 @@ mod tests {
         let cg = CallGraph::new(&db);
         let result = cg.get_dead_code(None).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_is_called_from_other_file_false_when_no_callers() {
+        let (_f, db) = make_db();
+        let cg = CallGraph::new(&db);
+        // Empty call_graph table → must return false
+        assert!(!cg.is_called_from_other_file("myFunction", "src/app.service.ts"));
     }
 }

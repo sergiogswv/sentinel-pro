@@ -74,6 +74,9 @@ pub enum ProCommands {
         /// Formato de salida: text (default) o json
         #[arg(long, default_value = "text")]
         format: String,
+        /// Máximo de archivos a auditar (default: 20). Usa un número mayor para proyectos grandes.
+        #[arg(long, default_value = "20")]
+        max_files: usize,
     },
     /// Gestión de modelos de ML Local
     Ml {

@@ -68,6 +68,7 @@ impl StaticAnalyzer for DeadCodeAnalyzer {
                         message: format!("La entidad '{}' parece estar declarada pero nunca utilizada.", name),
                         level: RuleLevel::Warning,
                         line: find_line_of(source_code, name),
+                        symbol: Some(name.to_string()),
                     });
                 }
             }
@@ -110,11 +111,20 @@ impl StaticAnalyzer for UnusedImportsAnalyzer {
                 let name = node.utf8_text(source_code.as_bytes()).unwrap_or("");
                 
                 if count_word_occurrences(source_code, name) == 1 {
+                    // Skip if used as a decorator: @Name or @Name()
+                    let decorator_pattern = format!(r"@{}\b", regex::escape(name));
+                    let used_as_decorator = regex::Regex::new(&decorator_pattern)
+                        .map(|re| re.is_match(source_code))
+                        .unwrap_or(false);
+                    if used_as_decorator {
+                        continue;
+                    }
                     violations.push(RuleViolation {
                         rule_name: "UNUSED_IMPORT".to_string(),
                         message: format!("El import '{}' no se está utilizando en este archivo.", name),
                         level: RuleLevel::Warning,
                         line: find_line_of(source_code, name),
+                        symbol: Some(name.to_string()),
                     });
                 }
             }
@@ -196,6 +206,7 @@ impl StaticAnalyzer for ComplexityAnalyzer {
                         message: format!("La función tiene una complejidad ciclomática de {} (máximo recomendado: 10).", complexity),
                         level: RuleLevel::Error,
                         line: Some(func_node.start_position().row + 1),
+                        symbol: None,
                     });
                 }
             }
@@ -223,6 +234,7 @@ impl StaticAnalyzer for ComplexityAnalyzer {
                         ),
                         level: RuleLevel::Warning,
                         line: Some(start_line + 1),
+                        symbol: None,
                     });
                 }
             }
@@ -293,6 +305,7 @@ impl NamingAnalyzerWithFramework {
                             ),
                             level: RuleLevel::Info,
                             line: node_line,
+                            symbol: None,
                         });
                     }
                 } else {
@@ -306,6 +319,7 @@ impl NamingAnalyzerWithFramework {
                             ),
                             level: RuleLevel::Info,
                             line: node_line,
+                            symbol: None,
                         });
                     }
                 }
@@ -416,6 +430,29 @@ export class AppService {}";
         let flagged = violations.iter().any(|v| v.rule_name == "DEAD_CODE");
         // Con word-boundary: "username" NO cuenta como uso de "user" → DEAD_CODE debe reportarse
         assert!(flagged, "user está declarado y nunca usado como palabra completa — debe reportarse DEAD_CODE");
+    }
+
+    #[test]
+    fn test_dead_code_symbol_field_populated() {
+        let lang = ts_lang();
+        let analyzer = DeadCodeAnalyzer::new();
+        let code = "function unusedFn() { return 42; }";
+        let violations = analyzer.analyze(&lang, code);
+        let v = violations.iter().find(|v| v.rule_name == "DEAD_CODE")
+            .expect("Should detect DEAD_CODE");
+        assert_eq!(v.symbol, Some("unusedFn".to_string()),
+            "symbol field must be populated for DEAD_CODE violations");
+    }
+
+    #[test]
+    fn test_unused_import_not_flagged_when_decorator() {
+        let lang = ts_lang();
+        let analyzer = UnusedImportsAnalyzer::new();
+        // ApiProperty only appears as @ApiProperty() decorator — must NOT be flagged
+        let code = "import { ApiProperty } from '@nestjs/swagger';\n\nexport class UserDto {\n  @ApiProperty()\n  name: string;\n}";
+        let violations = analyzer.analyze(&lang, code);
+        let flagged = violations.iter().any(|v| v.rule_name == "UNUSED_IMPORT");
+        assert!(!flagged, "@ApiProperty() is used as decorator — must not be UNUSED_IMPORT");
     }
 
     #[test]

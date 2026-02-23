@@ -43,4 +43,5 @@ pub struct RuleViolation {
     pub message: String,
     pub level: RuleLevel,
     pub line: Option<usize>,
+    pub symbol: Option<String>,
 }

@@ -62,8 +62,21 @@ impl RuleEngine {
         // --- Análisis de Proyecto Cruzado (SI hay DB disponible) ---
         if let Some(ref db) = self.index_db {
             let rel_path = _file_path.to_string_lossy();
-            // 1. Dead Code de Proyecto
             let call_graph = crate::index::call_graph::CallGraph::new(db);
+
+            // Post-filter: remove DEAD_CODE violations for symbols called from other files
+            violations.retain(|v| {
+                if v.rule_name != "DEAD_CODE" {
+                    return true;
+                }
+                if let Some(ref sym) = v.symbol {
+                    !call_graph.is_called_from_other_file(sym, &rel_path)
+                } else {
+                    true
+                }
+            });
+
+            // 1. Dead Code de Proyecto (DEAD_CODE_GLOBAL from call graph)
             if let Ok(dead_symbols) = call_graph.get_dead_code(Some(&rel_path)) {
                 for symbol in dead_symbols {
                     violations.push(RuleViolation {
@@ -71,6 +84,7 @@ impl RuleEngine {
                         message: format!("El símbolo '{}' no tiene llamadas registradas en todo el proyecto.", symbol),
                         level: RuleLevel::Warning,
                         line: None,
+                        symbol: None,
                     });
                 }
             }
@@ -85,6 +99,7 @@ impl RuleEngine {
                         message: rule.description.clone(),
                         level: rule.level.clone(),
                         line: None,
+                        symbol: None,
                     });
                 }
             }

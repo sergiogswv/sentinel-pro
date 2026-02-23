@@ -108,6 +108,14 @@ else
   pass "audit --format json (sin archivos TS, skip)"
 fi
 
+# Assert: --max-files flag is accepted (no "unknown flag" error)
+AUDIT_MAXFILES=$(timeout 60 sentinel pro audit src/ --no-fix --max-files 3 2>&1 || true)
+if ! echo "$AUDIT_MAXFILES" | grep -qE "error: unexpected argument|unrecognized option"; then
+  pass "audit acepta --max-files sin error"
+else
+  fail "audit rechaza --max-files" "$AUDIT_MAXFILES"
+fi
+
 # ── PASO 4: review con contexto ampliado ──────────────────────────────────
 echo ""
 echo "[ 4/4 ] sentinel pro review"
