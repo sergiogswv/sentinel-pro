@@ -50,7 +50,9 @@ impl AgentOrchestrator {
         }
 
         if let Some(original_code) = &task.context {
-            if let Some(new_code) = result.artifacts.first() {
+            // Usa el último artifact para comparar: cuando hay helpers extraídos,
+            // artifacts[1] contiene main+helpers combinados (comparación justa con el original).
+            if let Some(new_code) = result.artifacts.last() {
                 if let Some(reviewer) = self.get_agent("ReviewerAgent") {
                     use colored::*;
                     println!("   🛡️  BusinessLogicGuard: Verificando que no se haya roto la lógica de negocio...");

@@ -28,6 +28,9 @@ pub enum ProCommands {
     Check {
         /// Archivo o carpeta a revisar
         target: String,
+        /// Formato de salida: text (default) o json (para CI/CD)
+        #[arg(long, default_value = "text")]
+        format: String,
     },
     /// Análisis profundo (Capa 1 + Capa 2) e interactivo de un archivo
     Analyze {
@@ -40,9 +43,9 @@ pub enum ProCommands {
         #[arg(long, default_value = "json")]
         format: String,
     },
-    /// Refactorización automática de código
-    Refactor {
-        /// Archivo a refactorizar
+    /// Divide un archivo grande en múltiples archivos por dominio
+    Split {
+        /// Archivo a dividir
         file: String,
     },
     /// Corrección automática de bugs
@@ -65,6 +68,12 @@ pub enum ProCommands {
     Audit {
         /// Archivo o carpeta a auditar
         target: String,
+        /// Solo mostrar findings sin aplicar fixes (compatible con CI/CD)
+        #[arg(long)]
+        no_fix: bool,
+        /// Formato de salida: text (default) o json
+        #[arg(long, default_value = "text")]
+        format: String,
     },
     /// Gestión de modelos de ML Local
     Ml {

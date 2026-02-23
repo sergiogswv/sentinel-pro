@@ -1,7 +1,7 @@
 use crate::agents::base::{AgentContext, Task, TaskType};
 use crate::agents::fix_suggester::FixSuggesterAgent;
 use crate::agents::orchestrator::AgentOrchestrator;
-use crate::agents::refactor::RefactorAgent;
+use crate::agents::splitter::SplitterAgent;
 use crate::agents::reviewer::ReviewerAgent;
 use crate::agents::tester::TesterAgent;
 use crate::commands::ProCommands;
@@ -86,17 +86,23 @@ pub fn handle_pro_command(subcommand: ProCommands) {
     orchestrator.register(Arc::new(FixSuggesterAgent::new()));
     orchestrator.register(Arc::new(ReviewerAgent::new()));
     orchestrator.register(Arc::new(TesterAgent::new()));
-    orchestrator.register(Arc::new(RefactorAgent::new()));
+    orchestrator.register(Arc::new(SplitterAgent::new()));
 
     // Ejecutar en Runtime de Tokio
     let rt = tokio::runtime::Runtime::new().unwrap();
 
     match subcommand {
-        ProCommands::Check { target } => {
+        ProCommands::Check { target, format } => {
             let path = agent_context.project_root.join(&target);
+            let json_mode = format.to_lowercase() == "json";
+
             if !path.exists() {
-                println!("{} El destino '{}' no existe en el proyecto.", "❌".red(), target);
-                return;
+                if json_mode {
+                    println!("{{\"error\":\"El destino '{}' no existe\"}}",  target);
+                } else {
+                    println!("{} El destino '{}' no existe en el proyecto.", "❌".red(), target);
+                }
+                std::process::exit(2);
             }
 
             let mut files_to_check = Vec::new();
@@ -112,11 +118,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                         let p = entry.path();
                         if p.is_file() {
                             let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-                            if agent_context
-                                .config
-                                .file_extensions
-                                .contains(&ext.to_string())
-                            {
+                            if agent_context.config.file_extensions.contains(&ext.to_string()) {
                                 files_to_check.push(p.to_path_buf());
                             }
                         }
@@ -125,11 +127,18 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             }
 
             if files_to_check.is_empty() {
-                println!("{} No se encontraron archivos para revisar en '{}'.", "⚠️".yellow(), target);
+                if json_mode {
+                    println!("{{\"checked\":0,\"errors\":0,\"warnings\":0,\"infos\":0,\"issues\":[]}}");
+                } else {
+                    println!("{} No se encontraron archivos para revisar en '{}'.", "⚠️".yellow(), target);
+                }
                 return;
             }
 
-            println!("\n{} Ejecutando Capa 1 (Análisis Estático) en {} archivos...", "⚡".cyan(), files_to_check.len());
+            if !json_mode {
+                println!("\n{} Capa 1 — Análisis Estático en {} archivo(s)...",
+                    "⚡".cyan(), files_to_check.len());
+            }
 
             let mut rule_engine = crate::rules::engine::RuleEngine::new();
             if let Some(ref db) = agent_context.index_db {
@@ -140,33 +149,92 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 let _ = rule_engine.load_from_yaml(&rules_path);
             }
 
-            let mut total_violations = 0;
+            #[derive(serde::Serialize)]
+            struct JsonIssue {
+                file: String,
+                rule: String,
+                severity: String,
+                message: String,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                line: Option<usize>,
+            }
+
+            let mut json_issues: Vec<JsonIssue> = Vec::new();
+            let mut n_errors = 0usize;
+            let mut n_warnings = 0usize;
+            let mut n_infos = 0usize;
+
             for file_path in &files_to_check {
                 let content = std::fs::read_to_string(file_path).unwrap_or_default();
                 let violations = rule_engine.validate_file(file_path, &content);
 
-                if !violations.is_empty() {
-                    let rel_path = file_path
-                        .strip_prefix(&agent_context.project_root)
-                        .unwrap_or(file_path);
-                    
-                    println!("\n📄 {}", rel_path.display().to_string().bold().cyan());
-                    for v in &violations {
-                        let level_icon = match v.level {
-                            RuleLevel::Error => "❌ ERROR".red(),
-                            RuleLevel::Warning => "⚠️  WARN ".yellow(),
-                            RuleLevel::Info => "ℹ️  INFO ".blue(),
-                        };
-                        println!("   {} [{}]: {}", level_icon, v.rule_name.yellow(), v.message);
+                if violations.is_empty() {
+                    continue;
+                }
+
+                let rel = file_path
+                    .strip_prefix(&agent_context.project_root)
+                    .unwrap_or(file_path);
+
+                if !json_mode {
+                    println!("\n📄 {}", rel.display().to_string().bold().cyan());
+                }
+
+                for v in &violations {
+                    let (sev_str, icon) = match v.level {
+                        RuleLevel::Error   => { n_errors   += 1; ("error",   "❌ ERROR") }
+                        RuleLevel::Warning => { n_warnings += 1; ("warning", "⚠️  WARN ") }
+                        RuleLevel::Info    => { n_infos    += 1; ("info",    "ℹ️  INFO ") }
+                    };
+
+                    if json_mode {
+                        json_issues.push(JsonIssue {
+                            file: rel.display().to_string(),
+                            rule: v.rule_name.clone(),
+                            severity: sev_str.to_string(),
+                            message: v.message.clone(),
+                            line: v.line,
+                        });
+                    } else {
+                        let line_info = v.line.map(|l| format!(":{}", l)).unwrap_or_default();
+                        println!("   {} [{}{}]: {}", icon.color(match v.level {
+                            RuleLevel::Error   => "red",
+                            RuleLevel::Warning => "yellow",
+                            RuleLevel::Info    => "blue",
+                        }), v.rule_name.yellow(), line_info, v.message);
                     }
-                    total_violations += violations.len();
                 }
             }
 
-            if total_violations == 0 {
-                println!("\n✅ {} No se detectaron problemas estáticos.", "Perfecto:".green());
+            if json_mode {
+                #[derive(serde::Serialize)]
+                struct JsonOutput {
+                    checked: usize,
+                    errors: usize,
+                    warnings: usize,
+                    infos: usize,
+                    issues: Vec<JsonIssue>,
+                }
+                let out = JsonOutput {
+                    checked: files_to_check.len(),
+                    errors: n_errors,
+                    warnings: n_warnings,
+                    infos: n_infos,
+                    issues: json_issues,
+                };
+                println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+            } else if n_errors == 0 && n_warnings == 0 && n_infos == 0 {
+                println!("\n✅ Sin problemas detectados en {} archivo(s).", files_to_check.len());
             } else {
-                println!("\n🚩 Se detectaron {} problemas potenciales.", total_violations.to_string().red().bold());
+                println!("\n🚩 {} error(s)  ⚠️  {} warning(s)  ℹ️  {} info(s)",
+                    n_errors.to_string().red().bold(),
+                    n_warnings.to_string().yellow(),
+                    n_infos.to_string().blue());
+            }
+
+            // Exit 1 si hay errores → CI falla el build
+            if n_errors > 0 {
+                std::process::exit(1);
             }
         }
         ProCommands::Analyze { file } => {
@@ -270,17 +338,37 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                                 .unwrap_or_default();
 
                             if !selected.is_empty() {
+                                // Backup único antes de tocar el archivo
+                                // Usamos set_file_name para preservar nombres con múltiples puntos
+                                // (ej. hubspot.module.ts → hubspot.module.ts.bak, no hubspot.ts.bak)
+                                let backup_path = {
+                                    let mut p = path.clone();
+                                    let mut fname = path.file_name().unwrap_or_default().to_os_string();
+                                    fname.push(".bak");
+                                    p.set_file_name(fname);
+                                    p
+                                };
+                                if let Err(e) = std::fs::copy(&path, &backup_path) {
+                                    println!("   ❌ No se pudo crear backup: {}. Abortando.", e);
+                                    return;
+                                }
+                                println!(
+                                    "   🔙 Backup creado: {}",
+                                    backup_path.display().to_string().dimmed()
+                                );
+
                                 println!("\n🚀 Aplicando {} mejoras seleccionadas...", selected.len());
-                                
+
                                 for &idx in &selected {
                                     let issue = &issues[idx];
                                     println!("\n🛠️  Ejecutando: {}", issue.title.cyan().bold());
 
-                                    // Para cada fix, leemos el contenido ACTUAL (que pudo cambiar en el paso anterior)
-                                    let current_content = std::fs::read_to_string(&path).unwrap_or_else(|_| content.clone());
-                                    
+                                    let current_content = std::fs::read_to_string(&path)
+                                        .unwrap_or_else(|_| content.clone());
+                                    let current_len = current_content.len();
+
                                     let pb_fix = ui::crear_progreso("   🤖 Generando cambios...");
-                                    
+
                                     let fix_task = Task {
                                         id: uuid::Uuid::new_v4().to_string(),
                                         description: format!(
@@ -296,17 +384,20 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                                         context: Some(current_content),
                                     };
 
-                                    let fix_result = rt.block_on(orchestrator.execute_task("FixSuggesterAgent", &fix_task, &agent_context));
+                                    let fix_result = rt.block_on(orchestrator.execute_task(
+                                        "FixSuggesterAgent",
+                                        &fix_task,
+                                        &agent_context,
+                                    ));
                                     pb_fix.finish_and_clear();
 
                                     if let Ok(f_res) = fix_result {
-                                        if let Some(code) = f_res.artifacts.first() {
-                                            if !code.trim().is_empty() {
+                                        match f_res.artifacts.first() {
+                                            Some(code) if code.len() >= current_len / 3 => {
                                                 if let Err(e) = std::fs::write(&path, code) {
-                                                    println!("   ❌ Error al guardar en {}: {}", file, e);
+                                                    println!("   ❌ Error al guardar: {}", e);
                                                 } else {
-                                                    println!("   ✅ Mejora '{}' aplicada.", issue.title.green());
-                                                    
+                                                    println!("   ✅ '{}' aplicada.", issue.title.green());
                                                     let mut s = agent_context.stats.lock().unwrap();
                                                     s.total_analisis += 1;
                                                     s.sugerencias_aplicadas += 1;
@@ -314,15 +405,35 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                                                     s.guardar(&agent_context.project_root);
                                                 }
                                             }
+                                            Some(_) => {
+                                                println!(
+                                                    "   ⚠️  '{}': respuesta truncada, saltando.",
+                                                    issue.title
+                                                );
+                                            }
+                                            None => {
+                                                println!(
+                                                    "   ⚠️  '{}': sin código generado, saltando.",
+                                                    issue.title
+                                                );
+                                            }
                                         }
                                     }
                                 }
-                                println!("\n✨ Todas las mejoras seleccionadas han sido procesadas.");
+                                println!("\n✨ Mejoras procesadas. Backup disponible si necesitas revertir.");
                             }
                          }
                     } else {
-                        // Si no hay JSON o falla el parse, simplemente no mostramos el menú interactivo
-                        // pero el reporte humano ya se mostró arriba.
+                        let trimmed = json_str.trim();
+                        if trimmed.is_empty() || trimmed == "[]" {
+                            println!("\n   ℹ️  El análisis no identificó acciones automatizables.");
+                        } else {
+                            println!("\n   ⚠️  El AI no devolvió el JSON de acciones en el formato esperado.");
+                            println!("   ℹ️  El análisis de texto está completo arriba — revisa las sugerencias manualmente.");
+                            if std::env::var("SENTINEL_DEBUG").is_ok() {
+                                println!("   [debug] json_str: {}", &json_str[..json_str.len().min(200)]);
+                            }
+                        }
                     }
                 }
                 Err(e) => {
@@ -483,9 +594,8 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 println!("⚠️ Formato '{}' no soportado. Usa json o html.", format);
             }
         }
-        ProCommands::Refactor { file } => {
+        ProCommands::Split { file } => {
             let path = agent_context.project_root.join(&file);
-            // Leer contenido original
             let content = match std::fs::read_to_string(&path) {
                 Ok(c) => c,
                 Err(e) => {
@@ -494,10 +604,15 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
             };
 
-            let pb = ui::crear_progreso(&format!("Refactorizando {}...", file));
+            let pb = ui::crear_progreso(&format!("Dividiendo {}...", file));
 
-            // Crear Backup
-            let backup_path = path.with_extension(format!("{}.bak", path.extension().and_then(|e| e.to_str()).unwrap_or("")));
+            let backup_path = {
+                let mut p = path.clone();
+                let mut fname = path.file_name().unwrap_or_default().to_os_string();
+                fname.push(".bak");
+                p.set_file_name(fname);
+                p
+            };
             if let Err(e) = std::fs::copy(&path, &backup_path) {
                 pb.finish_and_clear();
                 println!("{} {}", "❌ Error al crear backup:".bold().red(), e);
@@ -507,45 +622,40 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
                 description: format!(
-                    "Refactoriza el archivo {} para mejorar legibilidad y estructura.",
+                    "Divide el archivo {} en múltiples archivos por dominio/responsabilidad.",
                     file
                 ),
-                task_type: TaskType::Refactor,
+                task_type: TaskType::Analyze,
                 file_path: Some(path.clone()),
                 context: Some(content),
             };
 
-            let result =
-                rt.block_on(orchestrator.execute_with_guard("RefactorAgent", &task, &agent_context));
+            // SplitterAgent no usa BusinessLogicGuard (la división es cambio intencional)
+            let result = rt.block_on(
+                orchestrator.execute_task("SplitterAgent", &task, &agent_context)
+            );
 
             pb.finish_and_clear();
 
             match result {
-                Ok(res) => {
-                    println!("{}", "🛠️ REFACTORIZACIÓN COMPLETADA".bold().green());
-                    println!("   🔙 Backup creado en: {}", backup_path.display().to_string().dimmed());
-
-                    if let Some(code) = res.artifacts.first() {
-                        match std::fs::write(&path, code) {
-                            Ok(_) => {
-                                println!("   💾 Cambios aplicados a: {}", file.cyan());
-                                // Update Stats
-                                let mut s = agent_context.stats.lock().unwrap();
-                                s.total_analisis += 1;
-                                s.sugerencias_aplicadas += 1;
-                                s.tiempo_estimado_ahorrado_mins += 15;
-                                s.guardar(&agent_context.project_root);
-                            }
-                            Err(e) => println!("   ⚠️  No se pudo escribir el archivo: {}", e),
-                        }
-                    } else {
-                        println!("   ⚠️  El agente no retornó código válido para reemplazar.");
-                    }
-
+                Ok(res) if res.success => {
+                    println!("{}", "✂️  DIVISIÓN COMPLETADA".bold().green());
+                    println!(
+                        "   🔙 Backup en: {}",
+                        backup_path.display().to_string().dimmed()
+                    );
                     println!("\n{}", res.output);
+                    {
+                        let mut s = agent_context.stats.lock().unwrap();
+                        s.total_analisis += 1;
+                        s.guardar(&agent_context.project_root);
+                    }
+                }
+                Ok(res) => {
+                    println!("   ℹ️  {}", res.output);
                 }
                 Err(e) => {
-                    println!("{} {}", "❌ Error al refactorizar:".bold().red(), e);
+                    println!("{} {}", "❌ Error al dividir:".bold().red(), e);
                 }
             }
         }
@@ -562,9 +672,20 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
             let pb = ui::crear_progreso(&format!("Corrigiendo bugs en {}...", file));
 
-            // Crear Backup
-            let backup_path = path.with_extension(format!("{}.bak", path.extension().and_then(|e| e.to_str()).unwrap_or("")));
-            let _ = std::fs::copy(&path, &backup_path);
+            let backup_path = {
+                let mut p = path.clone();
+                let mut fname = path.file_name().unwrap_or_default().to_os_string();
+                fname.push(".bak");
+                p.set_file_name(fname);
+                p
+            };
+            if let Err(e) = std::fs::copy(&path, &backup_path) {
+                pb.finish_and_clear();
+                println!("{} {}", "❌ No se pudo crear backup:".bold().red(), e);
+                return;
+            }
+
+            let original_len = content.len();
 
             let task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -574,7 +695,6 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 context: Some(content),
             };
 
-            // Usamos CoderAgent para fixes por ahora
             let result =
                 rt.block_on(orchestrator.execute_with_guard("FixSuggesterAgent", &task, &agent_context));
 
@@ -582,26 +702,38 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
             match result {
                 Ok(res) => {
-                    println!("{}", "🩹 BUGS CORREGIDOS".bold().green());
-                    if let Some(code) = res.artifacts.first() {
-                        match std::fs::write(&path, code) {
-                            Ok(_) => {
-                                println!("   💾 Correcciones aplicadas a: {}", file.cyan());
-                                // Update Stats
-                                let mut s = agent_context.stats.lock().unwrap();
-                                s.total_analisis += 1;
-                                s.sugerencias_aplicadas += 1;
-                                s.bugs_criticos_evitados += 1;
-                                s.tiempo_estimado_ahorrado_mins += 20;
-                                s.guardar(&agent_context.project_root);
+                    println!("{}", "🩹 CORRECCIÓN COMPLETADA".bold().green());
+                    println!("   🔙 Backup en: {}", backup_path.display().to_string().dimmed());
+
+                    match res.artifacts.first() {
+                        Some(code) if code.len() >= original_len / 3 => {
+                            match std::fs::write(&path, code) {
+                                Ok(_) => {
+                                    println!("   💾 Cambios aplicados a: {}", file.cyan());
+                                    let mut s = agent_context.stats.lock().unwrap();
+                                    s.total_analisis += 1;
+                                    s.sugerencias_aplicadas += 1;
+                                    s.bugs_criticos_evitados += 1;
+                                    s.tiempo_estimado_ahorrado_mins += 20;
+                                    s.guardar(&agent_context.project_root);
+                                }
+                                Err(e) => println!("   ⚠️  No se pudo escribir el archivo: {}", e),
                             }
-                            Err(e) => println!("   ⚠️  No se pudo escribir el archivo: {}", e),
+                        }
+                        Some(_) => {
+                            println!("   ⚠️  Respuesta truncada (muy corta vs original). Sin cambios.");
+                            println!("   📄 Archivo original intacto.");
+                        }
+                        None => {
+                            println!("   ⚠️  El agente no retornó código. Sin cambios al archivo.");
                         }
                     }
+
                     println!("\n{}", res.output);
                 }
                 Err(e) => {
                     println!("{} {}", "❌ Error al corregir:".bold().red(), e);
+                    println!("   🔙 Backup disponible en: {}", backup_path.display().to_string().dimmed());
                 }
             }
         }
@@ -1217,14 +1349,26 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             let deps = crate::files::leer_dependencias(&agent_context.project_root);
             let deps_list = deps.join(", ");
 
-            // 3. Muestra de archivos fuente reales (máx 4 archivos, 60 líneas c/u)
-            // Prioriza src/ para evitar que node_modules/dist/vendor se cuelen primero.
+            // Cap del árbol de directorios a 100 líneas
+            let project_tree = {
+                let lines: Vec<&str> = project_tree.lines().collect();
+                if lines.len() > 100 {
+                    format!(
+                        "{}\n... (proyecto grande, se muestran primeras 100 líneas del árbol)",
+                        lines[..100].join("\n")
+                    )
+                } else {
+                    project_tree
+                }
+            };
+
+            // 3. Muestra de archivos fuente reales (máx 8 archivos, 100 líneas c/u)
+            // Prioriza src/ y tipos de archivo NestJS/arquitectura relevante.
             let dirs_ignorados = [
                 "node_modules", "dist", "build", ".next", ".nuxt",
                 "vendor", "target", ".git", "__pycache__", "coverage",
             ];
-            let mut codigo_muestra = String::new();
-            let mut muestras = 0usize;
+            // Recolectar todos los candidatos primero para poder priorizarlos
             let walk_root = {
                 let src = agent_context.project_root.join("src");
                 if src.exists() { src } else { agent_context.project_root.clone() }
@@ -1233,16 +1377,11 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 .hidden(false)
                 .git_ignore(true)
                 .build();
+            let mut candidates: Vec<std::path::PathBuf> = Vec::new();
             for entry_result in walker_src {
-                if muestras >= 4 {
-                    break;
-                }
                 if let Ok(entry) = entry_result {
                     let p = entry.path();
-                    // Saltar directorios de dependencias/build aunque no estén en .gitignore
-                    if dirs_ignorados.iter().any(|d| {
-                        p.components().any(|c| c.as_os_str() == *d)
-                    }) {
+                    if dirs_ignorados.iter().any(|d| p.components().any(|c| c.as_os_str() == *d)) {
                         continue;
                     }
                     if !p.is_file() {
@@ -1250,22 +1389,49 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     }
                     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
                     if agent_context.config.file_extensions.contains(&ext.to_string()) {
-                        if let Ok(contenido) = std::fs::read_to_string(p) {
-                            let preview: String =
-                                contenido.lines().take(60).collect::<Vec<_>>().join("\n");
-                            let rel = p
-                                .strip_prefix(&agent_context.project_root)
-                                .map(|r| r.display().to_string())
-                                .unwrap_or_else(|_| p.display().to_string());
-                            codigo_muestra
-                                .push_str(&format!("\n\n=== {} ===\n{}", rel, preview));
-                            muestras += 1;
-                        }
+                        candidates.push(p.to_path_buf());
                     }
                 }
             }
 
+            // Priorizar archivos de arquitectura (NestJS, etc.) al frente
+            let priority_patterns = [
+                ".service.ts", ".module.ts", ".controller.ts",
+                ".gateway.ts", ".repository.ts", ".entity.ts",
+            ];
+            candidates.sort_by_key(|p| {
+                let name = p.to_string_lossy();
+                let is_priority = priority_patterns.iter().any(|pat| name.ends_with(pat));
+                if is_priority { 0usize } else { 1usize }
+            });
+
+            let mut codigo_muestra = String::new();
+            let mut muestras = 0usize;
+            let mut total_lines_loaded = 0usize;
+            for p in &candidates {
+                if muestras >= 8 {
+                    break;
+                }
+                if let Ok(contenido) = std::fs::read_to_string(p) {
+                    let lines: Vec<&str> = contenido.lines().collect();
+                    let preview_lines = lines.len().min(100);
+                    let preview = lines[..preview_lines].join("\n");
+                    let rel = p
+                        .strip_prefix(&agent_context.project_root)
+                        .map(|r| r.display().to_string())
+                        .unwrap_or_else(|_| p.display().to_string());
+                    codigo_muestra.push_str(&format!("\n\n=== {} ===\n{}", rel, preview));
+                    muestras += 1;
+                    total_lines_loaded += preview_lines;
+                }
+            }
+
             pb.finish_with_message("Estructura analizada.");
+
+            println!(
+                "   📎 Contexto: {} archivo(s), {} líneas de código cargadas",
+                muestras, total_lines_loaded
+            );
 
             // Aviso si el modelo configurado es local — los modelos pequeños (≤7B)
             // pueden generar análisis genérico en lugar de feedback específico del código.
@@ -1445,14 +1611,41 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                                                             Some(rel_path) => {
                                                                 let target = agent_context.project_root.join(rel_path);
 
-                                                                // Seguridad: rechazar si apunta a un directorio
                                                                 if target.is_dir() {
-                                                                    println!("   ⚠️  '{}' es un directorio, omitido. El AI debe especificar un archivo completo.", rel_path.yellow());
+                                                                    println!("   ⚠️  '{}' es un directorio, omitido.", rel_path.yellow());
                                                                     continue;
                                                                 }
 
                                                                 if let Some(parent) = target.parent() {
                                                                     let _ = std::fs::create_dir_all(parent);
+                                                                }
+
+                                                                // Backup si el archivo ya existe
+                                                                if target.exists() {
+                                                                    let original_len = std::fs::metadata(&target)
+                                                                        .map(|m| m.len() as usize)
+                                                                        .unwrap_or(0);
+
+                                                                    // Size check: evitar sobreescribir con código truncado
+                                                                    if original_len > 0 && code.len() < original_len / 3 {
+                                                                        println!(
+                                                                            "   ⚠️  '{}': respuesta truncada ({} chars vs {} original), saltando.",
+                                                                            rel_path, code.len(), original_len
+                                                                        );
+                                                                        continue;
+                                                                    }
+
+                                                                    let bak = {
+                                                                        let mut p = target.clone();
+                                                                        let mut fname = target.file_name().unwrap_or_default().to_os_string();
+                                                                        fname.push(".bak");
+                                                                        p.set_file_name(fname);
+                                                                        p
+                                                                    };
+                                                                    if let Err(e) = std::fs::copy(&target, &bak) {
+                                                                        println!("   ⚠️  No se pudo crear backup de '{}': {}", rel_path, e);
+                                                                        continue;
+                                                                    }
                                                                 }
 
                                                                 match std::fs::write(&target, code) {
@@ -1506,7 +1699,9 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
             }
         }
-        ProCommands::Audit { target } => {
+        ProCommands::Audit { target, no_fix, format } => {
+            let json_mode = format.to_lowercase() == "json";
+            let non_interactive = no_fix || json_mode;
             let path = agent_context.project_root.join(&target);
             if !path.exists() {
                 println!("{} El destino '{}' no existe en el proyecto.", "❌".red(), target);
@@ -1547,60 +1742,164 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 return;
             }
 
-            println!(
-                "🔍 Inciando Auditoría en {} archivos...",
-                files_to_audit.len().to_string().cyan()
-            );
-            let mut all_issues = Vec::new();
+            if !json_mode {
+                println!(
+                    "🔍 Iniciando Auditoría en {} archivo(s)...",
+                    files_to_audit.len().to_string().cyan()
+                );
+            }
+            let mut all_issues: Vec<AuditIssue> = Vec::new();
+            let mut parse_failures = 0usize;
 
             for (i, file_path) in files_to_audit.iter().enumerate() {
                 let rel_path = file_path
                     .strip_prefix(&agent_context.project_root)
                     .unwrap_or(file_path);
-                let pb = ui::crear_progreso(&format!(
-                    "[{}/{}] Auditando {}...",
-                    i + 1,
-                    files_to_audit.len(),
-                    rel_path.display()
-                ));
-
-                let content = std::fs::read_to_string(file_path).unwrap_or_default();
-                let audit_prompt = format!(
-                    "Realiza una auditoría técnica del archivo '{}'.\n\
-                    OBJETIVO: Identificar problemas de calidad, seguridad o bugs que sean CORREGIBLES.\n\
-                    REGLAS:\n\
-                    1. Genera un array JSON con los problemas.\n\
-                    2. Cada objeto DEBE tener: title, description, severity (High/Medium/Low), suggested_fix.\n\
-                    3. Responde SOLO con el JSON.\n\n\
-                    CONTENIDO:\n{}",
-                    rel_path.display(),
-                    content
-                );
-
-                let task = Task {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    description: format!("Auditando {}", rel_path.display()),
-                    task_type: TaskType::Analyze,
-                    file_path: Some(file_path.clone()),
-                    context: Some(audit_prompt),
+                let pb = if !json_mode {
+                    ui::crear_progreso(&format!(
+                        "[{}/{}] Auditando {}...",
+                        i + 1,
+                        files_to_audit.len(),
+                        rel_path.display()
+                    ))
+                } else {
+                    indicatif::ProgressBar::hidden()
                 };
 
-                if let Ok(res) =
-                    rt.block_on(orchestrator.execute_task("ReviewerAgent", &task, &agent_context))
-                {
-                    let json_str = crate::ai::utils::extraer_json(&res.output);
-                    if let Ok(mut issues) = serde_json::from_str::<Vec<AuditIssue>>(&json_str) {
-                        for issue in &mut issues {
-                            issue.file_path = file_path.to_string_lossy().to_string();
-                            all_issues.push(issue.clone());
+                let content = std::fs::read_to_string(file_path).unwrap_or_default();
+
+                // IMPORTANTE: la instrucción JSON va en `description` (no en `context`) para que
+                // ReviewerAgent detecte la keyword "JSON" y NO agregue el bloque FORMATO DE RESPUESTA
+                // que anularía la instrucción JSON-only.
+                let task = Task {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    description: format!(
+                        "Realiza una auditoría técnica del archivo '{}'.\n\
+                        OBJETIVO: Identificar problemas de calidad, seguridad o bugs CORREGIBLES.\n\
+                        REGLAS:\n\
+                        1. Analiza el código y genera un array JSON con los problemas encontrados.\n\
+                        2. Cada objeto DEBE tener exactamente estos campos: title, description, severity (High/Medium/Low), suggested_fix.\n\
+                        3. Responde ÚNICAMENTE con el bloque ```json — sin texto introductorio ni explicaciones adicionales.\n\
+                        FORMATO JSON REQUERIDO:\n\
+                        ```json\n\
+                        [\n\
+                          {{\"title\": \"...\", \"description\": \"...\", \"severity\": \"High|Medium|Low\", \"suggested_fix\": \"...\"}}\n\
+                        ]\n\
+                        ```",
+                        rel_path.display()
+                    ),
+                    task_type: TaskType::Analyze,
+                    file_path: Some(file_path.clone()),
+                    context: Some(content),
+                };
+
+                match rt.block_on(orchestrator.execute_task("ReviewerAgent", &task, &agent_context)) {
+                    Ok(res) => {
+                        let json_str = crate::ai::utils::extraer_json(&res.output);
+                        match serde_json::from_str::<Vec<AuditIssue>>(&json_str) {
+                            Ok(mut issues) => {
+                                for issue in &mut issues {
+                                    issue.file_path = file_path.to_string_lossy().to_string();
+                                    all_issues.push(issue.clone());
+                                }
+                            }
+                            Err(_) => {
+                                parse_failures += 1;
+                                pb.finish_and_clear();
+                                if !json_mode {
+                                    println!(
+                                        "   ⚠️  {}: el AI no devolvió JSON válido — archivo saltado.",
+                                        rel_path.display().to_string().yellow()
+                                    );
+                                }
+                                continue;
+                            }
                         }
+                    }
+                    Err(e) => {
+                        parse_failures += 1;
+                        pb.finish_and_clear();
+                        if !json_mode {
+                            println!("   ❌ Error auditando {}: {}", rel_path.display(), e);
+                        }
+                        continue;
                     }
                 }
                 pb.finish_and_clear();
             }
 
             if all_issues.is_empty() {
-                println!("{} No se detectaron problemas corregibles.", "✅".green());
+                if parse_failures > 0 && parse_failures == files_to_audit.len() {
+                    println!(
+                        "{} La auditoría no pudo procesar ningún archivo (fallos de formato AI).",
+                        "⚠️".yellow()
+                    );
+                    println!("   Intenta de nuevo o revisa la configuración del modelo.");
+                } else if parse_failures > 0 {
+                    println!(
+                        "{} Sin issues en los archivos procesados ({} con errores de formato).",
+                        "✅".green(), parse_failures
+                    );
+                } else {
+                    println!("{} No se detectaron problemas corregibles.", "✅".green());
+                }
+                return;
+            }
+
+            if parse_failures > 0 {
+                println!(
+                    "   ⚠️  {} archivo(s) no pudieron procesarse por formato AI incorrecto.",
+                    parse_failures
+                );
+            }
+
+            // Modo no-interactivo: --no-fix o --format json
+            if non_interactive {
+                let n_high = all_issues.iter().filter(|i| i.severity.to_lowercase() == "high").count();
+                let n_medium = all_issues.iter().filter(|i| i.severity.to_lowercase() == "medium").count();
+                let n_low = all_issues.iter().filter(|i| i.severity.to_lowercase() == "low").count();
+
+                if json_mode {
+                    #[derive(serde::Serialize)]
+                    struct AuditJsonOutput {
+                        files_audited: usize,
+                        total_issues: usize,
+                        high: usize,
+                        medium: usize,
+                        low: usize,
+                        issues: Vec<AuditIssue>,
+                    }
+                    let out = AuditJsonOutput {
+                        files_audited: files_to_audit.len(),
+                        total_issues: all_issues.len(),
+                        high: n_high,
+                        medium: n_medium,
+                        low: n_low,
+                        issues: all_issues.clone(),
+                    };
+                    println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+                } else {
+                    println!(
+                        "\n📑 Auditoría: {} issues — 🔴 {} High  🟡 {} Medium  🟢 {} Low",
+                        all_issues.len(), n_high, n_medium, n_low
+                    );
+                    for issue in &all_issues {
+                        let rel_file = std::path::Path::new(&issue.file_path)
+                            .strip_prefix(&agent_context.project_root)
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|_| issue.file_path.clone());
+                        println!(
+                            "   [{}] {} — {} ({})",
+                            issue.severity.to_uppercase(),
+                            issue.title.bold(),
+                            issue.description,
+                            rel_file.cyan()
+                        );
+                    }
+                }
+                if n_high > 0 {
+                    std::process::exit(1);
+                }
                 return;
             }
 
@@ -1609,7 +1908,17 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 all_issues.len().to_string().bold().yellow()
             );
 
-            let options: Vec<String> = all_issues
+            let display_issues = if all_issues.len() > 20 {
+                println!(
+                    "   ℹ️  Mostrando los primeros 20 de {} issues. Usa --format json para ver todos.",
+                    all_issues.len()
+                );
+                &all_issues[..20]
+            } else {
+                &all_issues[..]
+            };
+
+            let options: Vec<String> = display_issues
                 .iter()
                 .map(|i| {
                     let rel_file = std::path::Path::new(&i.file_path)
@@ -1640,7 +1949,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
             let selected = MultiSelect::with_theme(&ColorfulTheme::default())
                 .with_prompt("Selecciona los fixes que deseas aplicar (espacio=seleccionar, enter=confirmar):")
-                .max_length(10)
+                .max_length(20)
                 .items(&options)
                 .interact()
                 .unwrap_or_default();

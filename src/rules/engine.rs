@@ -70,6 +70,7 @@ impl RuleEngine {
                         rule_name: "DEAD_CODE_GLOBAL".to_string(),
                         message: format!("El símbolo '{}' no tiene llamadas registradas en todo el proyecto.", symbol),
                         level: RuleLevel::Warning,
+                        line: None,
                     });
                 }
             }
@@ -83,6 +84,7 @@ impl RuleEngine {
                         rule_name: rule.name.clone(),
                         message: rule.description.clone(),
                         level: rule.level.clone(),
+                        line: None,
                     });
                 }
             }

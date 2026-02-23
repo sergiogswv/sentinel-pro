@@ -132,6 +132,8 @@ pub fn start_monitor() {
                         crate::commands::pro::handle_pro_command(
                             crate::commands::ProCommands::Audit {
                                 target: final_path.to_string(),
+                                no_fix: false,
+                                format: "text".to_string(),
                             },
                         );
                         println!("✅ Auditoría terminada. Volviendo a monitorear...\n");

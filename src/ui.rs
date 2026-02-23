@@ -184,10 +184,6 @@ pub fn mostrar_ayuda(config: Option<&SentinelConfig>) {
         "Corrección inteligente de bugs".dimmed()
     );
     println!(
-        "  sentinel pro refactor <file>  {}",
-        "Refactorización (FixSuggester)".dimmed()
-    );
-    println!(
         "  sentinel pro test-all         {}",
         "Generación de tests (Tester)".dimmed()
     );

@@ -1,6 +1,25 @@
 use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 use crate::rules::{RuleViolation, RuleLevel};
 
+/// Cuenta ocurrencias de `word` como palabra completa (word-boundary) en `text`.
+/// Fallback a 2 (no reportar) si el patrón no compila.
+fn count_word_occurrences(text: &str, word: &str) -> usize {
+    let pattern = format!(r"\b{}\b", regex::escape(word));
+    match regex::Regex::new(&pattern) {
+        Ok(re) => re.find_iter(text).count(),
+        Err(_) => 2, // safe: no reportar falso positivo
+    }
+}
+
+/// Primera línea (1-based) donde aparece `word` en `source_code`, o None.
+fn find_line_of(source_code: &str, word: &str) -> Option<usize> {
+    source_code
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains(word))
+        .map(|(i, _)| i + 1)
+}
+
 pub trait StaticAnalyzer {
     fn analyze(&self, language: &Language, source_code: &str) -> Vec<RuleViolation>;
 }
@@ -42,12 +61,13 @@ impl StaticAnalyzer for DeadCodeAnalyzer {
                     continue;
                 }
                 
-                let count = source_code.matches(name).count();
+                let count = count_word_occurrences(source_code, name);
                 if count == 1 {
                     violations.push(RuleViolation {
                         rule_name: "DEAD_CODE".to_string(),
                         message: format!("La entidad '{}' parece estar declarada pero nunca utilizada.", name),
                         level: RuleLevel::Warning,
+                        line: find_line_of(source_code, name),
                     });
                 }
             }
@@ -89,11 +109,12 @@ impl StaticAnalyzer for UnusedImportsAnalyzer {
                 let node = capture.node;
                 let name = node.utf8_text(source_code.as_bytes()).unwrap_or("");
                 
-                if source_code.matches(name).count() == 1 {
+                if count_word_occurrences(source_code, name) == 1 {
                     violations.push(RuleViolation {
                         rule_name: "UNUSED_IMPORT".to_string(),
                         message: format!("El import '{}' no se está utilizando en este archivo.", name),
                         level: RuleLevel::Warning,
+                        line: find_line_of(source_code, name),
                     });
                 }
             }
@@ -174,6 +195,7 @@ impl StaticAnalyzer for ComplexityAnalyzer {
                         rule_name: "HIGH_COMPLEXITY".to_string(),
                         message: format!("La función tiene una complejidad ciclomática de {} (máximo recomendado: 10).", complexity),
                         level: RuleLevel::Error,
+                        line: Some(func_node.start_position().row + 1),
                     });
                 }
             }
@@ -200,6 +222,7 @@ impl StaticAnalyzer for ComplexityAnalyzer {
                             line_count
                         ),
                         level: RuleLevel::Warning,
+                        line: Some(start_line + 1),
                     });
                 }
             }
@@ -252,8 +275,10 @@ impl NamingAnalyzerWithFramework {
 
         while let Some((m, _)) = captures.next() {
             for capture in m.captures {
-                let name = capture.node.utf8_text(source_code.as_bytes()).unwrap_or("");
+                let node = capture.node;
+                let name = node.utf8_text(source_code.as_bytes()).unwrap_or("");
                 let has_snake = name.contains('_') && !name.chars().next().unwrap_or(' ').is_uppercase();
+                let node_line = Some(node.start_position().row + 1);
 
                 if self.expects_snake_case() {
                     // Python/PHP: camelCase ES la violación
@@ -267,6 +292,7 @@ impl NamingAnalyzerWithFramework {
                                 name, self.framework
                             ),
                             level: RuleLevel::Info,
+                            line: node_line,
                         });
                     }
                 } else {
@@ -279,6 +305,7 @@ impl NamingAnalyzerWithFramework {
                                 name, self.framework
                             ),
                             level: RuleLevel::Info,
+                            line: node_line,
                         });
                     }
                 }
@@ -362,5 +389,47 @@ mod tests {
         let code = "function my_function() { return 1; }";
         let violations = analyzer.analyze(&lang, code);
         assert!(!violations.is_empty(), "En NestJS/TS, snake_case sí es violación");
+    }
+
+    #[test]
+    fn test_unused_import_not_flagged_when_used() {
+        let lang = ts_lang();
+        let analyzer = UnusedImportsAnalyzer::new();
+        // Injectable aparece en el import Y como decorador → count > 1 → no debe reportarse
+        let code = "import { Injectable } from '@nestjs/common';
+
+@Injectable()
+export class AppService {}";
+        let violations = analyzer.analyze(&lang, code);
+        let flagged = violations.iter().any(|v| v.rule_name == "UNUSED_IMPORT");
+        assert!(!flagged, "Injectable está en uso — no debe ser reportado como UNUSED_IMPORT");
+    }
+
+    #[test]
+    fn test_dead_code_no_false_positive_on_substring() {
+        let lang = ts_lang();
+        let analyzer = DeadCodeAnalyzer::new();
+        // `user` está declarado pero NUNCA usado como palabra completa.
+        // `username` contiene "user" como substring pero NO es un uso de `user`.
+        let code = "const user = 1;\nconsole.log(username);";
+        let violations = analyzer.analyze(&lang, code);
+        let flagged = violations.iter().any(|v| v.rule_name == "DEAD_CODE");
+        // Con word-boundary: "username" NO cuenta como uso de "user" → DEAD_CODE debe reportarse
+        assert!(flagged, "user está declarado y nunca usado como palabra completa — debe reportarse DEAD_CODE");
+    }
+
+    #[test]
+    fn test_function_too_long_has_line_number() {
+        let lang = ts_lang();
+        let analyzer = ComplexityAnalyzer::new();
+        // Función de 55 líneas empezando en línea 1 → violation.line debe ser Some(1)
+        let long_fn = format!(
+            "function longFn() {{\n{}\n}}",
+            "  const x = 1;\n".repeat(54)
+        );
+        let violations = analyzer.analyze(&lang, &long_fn);
+        let v = violations.iter().find(|v| v.rule_name == "FUNCTION_TOO_LONG")
+            .expect("Debería detectar FUNCTION_TOO_LONG");
+        assert_eq!(v.line, Some(1), "La violación debe incluir el número de línea donde empieza la función");
     }
 }

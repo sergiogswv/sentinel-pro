@@ -4,4 +4,4 @@ pub mod workflow;
 pub mod fix_suggester;
 pub mod reviewer;
 pub mod tester;
-pub mod refactor;
+pub mod splitter;

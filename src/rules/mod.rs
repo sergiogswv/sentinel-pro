@@ -42,4 +42,5 @@ pub struct RuleViolation {
     pub rule_name: String,
     pub message: String,
     pub level: RuleLevel,
+    pub line: Option<usize>,
 }

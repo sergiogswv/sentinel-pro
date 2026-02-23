@@ -52,6 +52,15 @@ impl ReviewerAgent {
                 - Lista los hallazgos clasificados por severidad (Alta, Media, Baja).\n\
                 - Proporciona ejemplos de código corregido si es necesario.\n",
             );
+        } else if task.description.contains("JSON") {
+            // Refuerzo terminal: el AI tiende a seguir la última instrucción del prompt.
+            // Sin este recordatorio, los CRITERIOS DE REVISIÓN (añadidos arriba) anulan
+            // la instrucción JSON del task.description.
+            prompt.push_str(
+                "\n⚠️  RECORDATORIO FINAL: Tu respuesta DEBE terminar con el bloque ```json\n\
+                solicitado en las instrucciones anteriores. Sin ese bloque, la respuesta\n\
+                es inválida y no podrá ser procesada.\n",
+            );
         }
 
         prompt

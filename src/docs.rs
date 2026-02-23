@@ -40,7 +40,7 @@ pub fn actualizar_documentacion(
     docs_path.set_extension("md");
 
     let nueva_doc = format!(
-        "# 📖 Documentación: {}\n\n> ✨ Actualizado automáticamente por Sentinel v{}\n\n{}\n\n---\n*Último refactor: {:?}*",
+        "# 📖 Documentación: {}\n\n> ✨ Actualizado automáticamente por Sentinel v{}\n\n{}\n\n---\n*Última actualización: {:?}*",
         file_name,
         crate::config::SENTINEL_VERSION,
         resumen,
