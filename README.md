@@ -43,7 +43,17 @@ It acts as a silent partner that monitors every change, providing a two-layered 
 
 - [Rust](https://www.rust-lang.org/tools/install) (edition 2024)
 - API Key from [Claude](https://console.anthropic.com), [Gemini](https://makersuite.google.com/app/apikey), or a local LLM.
-- Project with `tree-sitter` supported languages (TS, JS, etc.)
+- Project with TypeScript or JavaScript for full static analysis support
+
+### Supported Languages
+
+| Feature | TypeScript / JavaScript | Go, Python, Java, Rust, others |
+|---------|------------------------|-------------------------------|
+| Static analysis (`check`) | ✅ Complete | 🔜 Next major version |
+| File monitor (`monitor`) | ✅ | ✅ |
+| Audit & Review (LLM) | ✅ | ✅ |
+
+> **Note:** `audit` and `review` use LLM directly and work with any language. Only static analysis rules (dead code, unused imports, complexity) are TypeScript/JavaScript-only.
 
 ### Installation
 

@@ -7,6 +7,7 @@ use crate::agents::tester::TesterAgent;
 use crate::commands::ProCommands;
 use crate::config::SentinelConfig;
 use crate::index::IndexDb;
+use crate::index::ProjectIndexBuilder;
 use crate::rules::RuleLevel;
 use crate::stats::SentinelStats;
 use crate::ui;
@@ -150,6 +151,34 @@ pub fn handle_pro_command(subcommand: ProCommands) {
     // Ejecutar en Runtime de Tokio
     let rt = tokio::runtime::Runtime::new().unwrap();
 
+    // Detect JSON mode before dispatching (to suppress indexing messages in JSON output)
+    let json_mode_global = match &subcommand {
+        ProCommands::Check { format, .. } => format.to_lowercase() == "json",
+        ProCommands::Audit { format, .. } => format.to_lowercase() == "json",
+        _ => false,
+    };
+
+    // Auto-indexación: si el índice está vacío, indexar en background mientras corre el comando
+    let mut index_handle: Option<std::thread::JoinHandle<anyhow::Result<()>>> = None;
+    if let Some(ref db) = agent_context.index_db {
+        if !db.is_populated() {
+            if !json_mode_global {
+                println!(
+                    "\n{} {}",
+                    "🧠 Indexando proyecto por primera vez...".cyan(),
+                    "(segundo plano)".dimmed()
+                );
+            }
+            let db_clone = Arc::clone(db);
+            let root_clone = agent_context.project_root.clone();
+            let extensions_clone = agent_context.config.file_extensions.clone();
+            index_handle = Some(std::thread::spawn(move || {
+                let builder = ProjectIndexBuilder::new(db_clone);
+                builder.index_project(&root_clone, &extensions_clone)
+            }));
+        }
+    }
+
     match subcommand {
         ProCommands::Check { target, format } => {
             let path = agent_context.project_root.join(&target);
@@ -161,6 +190,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 } else {
                     println!("{} El destino '{}' no existe en el proyecto.", "❌".red(), target);
                 }
+                if let Some(h) = index_handle.take() { let _ = h.join(); }
                 std::process::exit(2);
             }
 
@@ -203,40 +233,20 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             }
 
             if !json_mode {
-                // Cold-start warning: shown once if index has never been populated
-                let cold_start = agent_context
-                    .index_db
-                    .as_ref()
-                    .map(|db| !db.is_populated())
-                    .unwrap_or(false);
-                if cold_start {
+                // TS-first note: shown when no TS/JS files in target
+                let has_ts_js = files_to_check.iter().any(|f| {
+                    matches!(
+                        f.extension().and_then(|e| e.to_str()),
+                        Some("ts" | "js" | "tsx" | "jsx")
+                    )
+                });
+                if !has_ts_js {
                     println!(
-                        "\n{} {}",
-                        "⚠️  ÍNDICE VACÍO —".yellow().bold(),
-                        "Ejecuta `sentinel monitor` primero para análisis cross-file completo.".yellow()
+                        "ℹ️  Análisis estático optimizado para TypeScript/JavaScript."
                     );
                     println!(
-                        "   {}\n",
-                        "Continuando con análisis de archivo único...".yellow()
+                        "   Soporte para Go, Python, Rust, Java y otros lenguajes: próxima versión.\n"
                     );
-                }
-
-                // TS-first note: only shown when index is ready (cold-start takes priority)
-                if !cold_start {
-                    let has_ts_js = files_to_check.iter().any(|f| {
-                        matches!(
-                            f.extension().and_then(|e| e.to_str()),
-                            Some("ts" | "js" | "tsx" | "jsx")
-                        )
-                    });
-                    if !has_ts_js {
-                        println!(
-                            "ℹ️  Análisis estático optimizado para TypeScript/JavaScript."
-                        );
-                        println!(
-                            "   Soporte para Go, Python, Rust, Java y otros lenguajes: próxima versión.\n"
-                        );
-                    }
                 }
                 println!("\n{} Capa 1 — Análisis Estático en {} archivo(s)...",
                     "⚡".cyan(), files_to_check.len());
@@ -343,6 +353,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
             // Exit 1 si hay errores → CI falla el build
             if n_errors > 0 {
+                if let Some(h) = index_handle.take() { let _ = h.join(); }
                 std::process::exit(1);
             }
         }
@@ -1425,22 +1436,6 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             }
         }
         ProCommands::Review => {
-            // Review has no --format flag; always terminal output, no json_mode guard needed.
-            // Cold-start warning: shown once if index has never been populated
-            if let Some(ref db) = agent_context.index_db {
-                if !db.is_populated() {
-                    println!(
-                        "\n{} {}",
-                        "⚠️  ÍNDICE VACÍO —".yellow().bold(),
-                        "Ejecuta `sentinel monitor` primero para análisis cross-file completo.".yellow()
-                    );
-                    println!(
-                        "   {}\n",
-                        "Continuando con análisis de archivo único...".yellow()
-                    );
-                }
-            }
-
             let pb = ui::crear_progreso("Analizando estructura del proyecto...");
 
             // 1. Generar mapa del proyecto (Tree)
@@ -1828,23 +1823,6 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             let json_mode = format.to_lowercase() == "json";
             let non_interactive = no_fix || json_mode;
 
-            // Cold-start warning: shown once if index has never been populated
-            if !json_mode {
-                if let Some(ref db) = agent_context.index_db {
-                    if !db.is_populated() {
-                        println!(
-                            "\n{} {}",
-                            "⚠️  ÍNDICE VACÍO —".yellow().bold(),
-                            "Ejecuta `sentinel monitor` primero para análisis cross-file completo.".yellow()
-                        );
-                        println!(
-                            "   {}\n",
-                            "Continuando con análisis de archivo único...".yellow()
-                        );
-                    }
-                }
-            }
-
             let path = agent_context.project_root.join(&target);
             if !path.exists() {
                 println!("{} El destino '{}' no existe en el proyecto.", "❌".red(), target);
@@ -2026,6 +2004,15 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 pb.finish_and_clear();
             }
 
+            // Deduplicar: misma combinación (título normalizado, archivo) → conservar solo primero
+            {
+                let mut seen: std::collections::HashSet<(String, String)> =
+                    std::collections::HashSet::new();
+                all_issues.retain(|issue| {
+                    seen.insert((issue.title.to_lowercase(), issue.file_path.clone()))
+                });
+            }
+
             if all_issues.is_empty() {
                 if parse_failures > 0 && parse_failures == files_to_audit.len() {
                     println!(
@@ -2096,6 +2083,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     }
                 }
                 if n_high > 0 {
+                    if let Some(h) = index_handle.take() { let _ = h.join(); }
                     std::process::exit(1);
                 }
                 return;
@@ -2215,6 +2203,30 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             println!("\n✨ Proceso de auditoría y corrección finalizado.");
         }
     }
+
+    // Esperar a que termine la indexación background (si fue iniciada)
+    if let Some(handle) = index_handle {
+        match handle.join() {
+            Ok(Ok(_)) => {
+                if !json_mode_global {
+                    println!(
+                        "\n{} {}",
+                        "✅".green(),
+                        "Índice listo. Próxima ejecución tendrá análisis cross-file completo.".green()
+                    );
+                }
+            }
+            _ => {
+                if !json_mode_global {
+                    println!(
+                        "\n{} {}",
+                        "⚠️".yellow(),
+                        "Error en indexación background (análisis cross-file no disponible).".yellow()
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2282,5 +2294,34 @@ mod batching_tests {
             .find(|b| b.iter().any(|f| f.file_name().unwrap().to_str().unwrap().starts_with("user.")))
             .expect("user batch not found");
         assert_eq!(user_batch.len(), 2, "user batch must have both user.* files");
+    }
+
+    #[test]
+    fn test_audit_dedup_removes_duplicates() {
+        fn make_issue(title: &str, file_path: &str) -> super::AuditIssue {
+            super::AuditIssue {
+                title: title.to_string(),
+                description: String::new(),
+                severity: "high".to_string(),
+                suggested_fix: String::new(),
+                file_path: file_path.to_string(),
+            }
+        }
+
+        let mut issues = vec![
+            make_issue("Función muy larga", "src/user.service.ts"),  // kept
+            make_issue("Función muy larga", "src/user.service.ts"),  // duplicate → removed
+            make_issue("función muy larga", "src/user.service.ts"),  // case variant → removed
+            make_issue("Función muy larga", "src/auth.service.ts"),  // different file → kept
+            make_issue("Import no usado", "src/user.service.ts"),    // different title → kept
+        ];
+
+        let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+        issues.retain(|issue| seen.insert((issue.title.to_lowercase(), issue.file_path.clone())));
+
+        assert_eq!(issues.len(), 3);
+        assert_eq!(issues[0].file_path, "src/user.service.ts");
+        assert_eq!(issues[1].file_path, "src/auth.service.ts");
+        assert_eq!(issues[2].title, "Import no usado");
     }
 }

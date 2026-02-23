@@ -119,11 +119,11 @@ impl IndexDb {
             .expect("Failed to lock database connection")
     }
 
-    /// Returns true if the call_graph table has been populated (i.e., `sentinel monitor` has run).
+    /// Returns true if the file_index table has been populated (i.e., indexing has run at least once).
     pub fn is_populated(&self) -> bool {
         let conn = self.lock();
         conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM call_graph LIMIT 1)",
+            "SELECT EXISTS(SELECT 1 FROM file_index LIMIT 1)",
             [],
             |row| row.get::<_, i64>(0),
         )
@@ -150,13 +150,13 @@ mod tests {
     }
 
     #[test]
-    fn test_is_populated_true_after_call_graph_insert() {
+    fn test_is_populated_true_after_file_index_insert() {
         let (_f, db) = make_db();
         {
             let conn = db.lock();
             conn.execute(
-                "INSERT INTO call_graph (caller_file, caller_symbol, callee_symbol) VALUES (?, ?, ?)",
-                rusqlite::params!["src/a.ts", "funcA", "funcB"],
+                "INSERT INTO file_index (file_path, content_hash) VALUES (?, ?)",
+                rusqlite::params!["src/main.rs", "abc123"],
             )
             .unwrap();
         }
