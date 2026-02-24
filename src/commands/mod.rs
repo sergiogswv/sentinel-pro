@@ -1,3 +1,4 @@
+pub mod doctor;
 pub mod ignore;
 pub mod init;
 pub mod index;
@@ -60,6 +61,8 @@ pub enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Diagnóstico del entorno (config, API key, índice, lenguajes)
+    Doctor,
     /// Lista las reglas activas con umbrales configurables
     Rules,
     /// Comandos avanzados de la versión Pro

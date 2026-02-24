@@ -64,6 +64,11 @@ fn main() {
         Some(Commands::Pro { subcommand }) => {
             commands::pro::handle_pro_command(subcommand);
         }
+        Some(Commands::Doctor) => {
+            let project_root = crate::config::SentinelConfig::find_project_root()
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+            commands::doctor::handle_doctor_command(&project_root);
+        }
         Some(Commands::Rules) => {
             let project_root = crate::config::SentinelConfig::find_project_root()
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
