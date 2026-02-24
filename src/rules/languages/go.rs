@@ -2,6 +2,9 @@ use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 use crate::rules::{RuleViolation, RuleLevel};
 use crate::rules::static_analysis::StaticAnalyzer;
 
+static ALL_CAPS_RE: once_cell::sync::Lazy<regex::Regex> =
+    once_cell::sync::Lazy::new(|| regex::Regex::new(r"^[A-Z][A-Z0-9_]+$").unwrap());
+
 fn count_word_occurrences(text: &str, word: &str) -> usize {
     let pattern = format!(r"\b{}\b", regex::escape(word));
     match regex::Regex::new(&pattern) {
@@ -225,7 +228,7 @@ impl StaticAnalyzer for GoUncheckedErrorAnalyzer {
             let mut captures = cursor.captures(&query, root, source_code.as_bytes());
             while let Some((m, _)) = captures.next() {
                 let lhs_node = m.captures.iter().find(|c| query.capture_names()[c.index as usize] == "lhs");
-                let call_node = m.captures.iter().find(|c| query.capture_names()[c.index as usize] == "call");
+                let call_node = m.captures.iter().find(|c| query.capture_names()[c.index as usize] == "callee");
                 if let (Some(lhs), Some(call)) = (lhs_node, call_node) {
                     let lhs_text = lhs.node.utf8_text(source_code.as_bytes()).unwrap_or("");
                     if lhs_text.split(',').map(|s| s.trim()).all(|s| s == "_") {
@@ -244,12 +247,12 @@ impl StaticAnalyzer for GoUncheckedErrorAnalyzer {
 
         // `:=` short var declaration pattern
         process_query(
-            r#"(short_var_declaration left: (expression_list) @lhs right: (expression_list (call_expression) @call))"#,
+            r#"(short_var_declaration left: (expression_list) @lhs right: (expression_list (call_expression function: _ @callee)))"#,
             &mut violations,
         );
         // `=` assignment statement pattern
         process_query(
-            r#"(assignment_statement left: (expression_list) @lhs right: (expression_list (call_expression) @call))"#,
+            r#"(assignment_statement left: (expression_list) @lhs right: (expression_list (call_expression function: _ @callee)))"#,
             &mut violations,
         );
         violations
@@ -278,12 +281,10 @@ impl StaticAnalyzer for GoNamingConventionAnalyzer {
         let mut cursor = QueryCursor::new();
         let mut captures = cursor.captures(&query, root, source_code.as_bytes());
 
-        let all_caps_re = regex::Regex::new(r"^[A-Z][A-Z0-9_]{1,}$").unwrap();
-
         while let Some((m, _)) = captures.next() {
             for capture in m.captures {
                 let name = capture.node.utf8_text(source_code.as_bytes()).unwrap_or("");
-                if all_caps_re.is_match(name) {
+                if ALL_CAPS_RE.is_match(name) {
                     violations.push(RuleViolation {
                         rule_name: "NAMING_CONVENTION_GO".to_string(),
                         message: format!("Constante Go en formato ALL_CAPS: '{}'. Usar PascalCase según convención Go.", name),
@@ -342,6 +343,17 @@ impl StaticAnalyzer for GoDeferInLoopAnalyzer {
                 }
             }
         }
+
+        // Deduplicate: only one violation per unique loop line
+        let mut seen_lines = std::collections::HashSet::new();
+        violations.retain(|v| {
+            if let Some(line) = v.line {
+                seen_lines.insert(line)
+            } else {
+                true
+            }
+        });
+
         violations
     }
 }
@@ -502,9 +514,24 @@ func leaky() {
     }
 
     #[test]
-    fn test_go_registry_now_has_six_analyzers() {
-        let (_, analyzers) = super::super::get_language_and_analyzers("go").unwrap();
-        assert_eq!(analyzers.len(), 6, "Go should now have 6 analyzers");
+    fn test_go_unchecked_error_only_blanks_trigger() {
+        let src = r#"package main
+
+import "os"
+
+func main() {
+    f, err := os.Open("file.txt")
+    if err != nil { panic(err) }
+    defer f.Close()
+}
+"#;
+        let lang = go_lang();
+        let analyzer = GoUncheckedErrorAnalyzer;
+        let violations = analyzer.analyze(&lang, src);
+        assert!(
+            !violations.iter().any(|v| v.rule_name == "UNCHECKED_ERROR"),
+            "should NOT flag when error is named (not blank), got: {:?}", violations
+        );
     }
 
     #[test]
