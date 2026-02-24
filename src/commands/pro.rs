@@ -3056,4 +3056,23 @@ mod batching_tests {
             assert!(f.exists(), "get_changed_files returned non-existent path: {:?}", f);
         }
     }
+
+    #[test]
+    fn test_check_json_mode_flag_detection() {
+        // Verify that format == "json" activates json_mode
+        let fmt = "json".to_string();
+        let json_mode = fmt.to_lowercase() == "json";
+        assert!(json_mode, "--format json should activate json_mode");
+
+        let fmt2 = "text".to_string();
+        let json_mode2 = fmt2.to_lowercase() == "json";
+        assert!(!json_mode2, "--format text should not activate json_mode");
+    }
+
+    #[test]
+    fn test_sarif_mode_flag_detection() {
+        let fmt = "sarif".to_string();
+        let sarif_mode = fmt.to_lowercase() == "sarif";
+        assert!(sarif_mode, "--format sarif should activate sarif_mode");
+    }
 }

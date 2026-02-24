@@ -31,6 +31,11 @@ pub(crate) fn is_process_alive(pid: u32) -> bool {
     {
         use nix::sys::signal;
         use nix::unistd::Pid;
+        // PIDs larger than i32::MAX would wrap to negative values (e.g. -1),
+        // which have special semantics in kill(2). Treat them as non-existent.
+        if pid > i32::MAX as u32 {
+            return false;
+        }
         // kill(pid, 0) checks process existence without sending a signal
         signal::kill(Pid::from_raw(pid as i32), None).is_ok()
     }
@@ -575,5 +580,56 @@ mod tests {
         write_pid_file(&pid_path, 99).unwrap();
         assert!(pid_path.exists());
         assert_eq!(read_pid_file(&pid_path).unwrap(), 99);
+    }
+
+    #[test]
+    fn test_read_pid_file_with_corrupt_content() {
+        let tmp = TempDir::new().unwrap();
+        let pid_path = tmp.path().join("monitor.pid");
+        std::fs::write(&pid_path, "not_a_number").unwrap();
+        // Corrupt content must return None, not panic
+        assert!(read_pid_file(&pid_path).is_none());
+    }
+
+    #[test]
+    fn test_read_pid_file_with_whitespace() {
+        let tmp = TempDir::new().unwrap();
+        let pid_path = tmp.path().join("monitor.pid");
+        std::fs::write(&pid_path, "  42  \n").unwrap();
+        // Whitespace around PID must be trimmed correctly
+        assert_eq!(read_pid_file(&pid_path), Some(42));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_is_process_alive_self() {
+        // The current process must always be alive
+        let my_pid = std::process::id();
+        assert!(is_process_alive(my_pid), "own PID should be alive");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_is_process_alive_impossible_pid() {
+        // PID u32::MAX is guaranteed not to exist on any real system
+        // (max Linux PID is 4194304). Must return false, not panic.
+        assert!(!is_process_alive(u32::MAX));
+    }
+
+    #[test]
+    fn test_handle_status_removes_stale_pid_file() {
+        let tmp = TempDir::new().unwrap();
+        let sentinel_dir = tmp.path().join(".sentinel");
+        std::fs::create_dir_all(&sentinel_dir).unwrap();
+        let pid_path = sentinel_dir.join("monitor.pid");
+
+        // Write a PID that is guaranteed not to exist
+        write_pid_file(&pid_path, u32::MAX).unwrap();
+        assert!(pid_path.exists(), "pid file should exist before handle_status");
+
+        handle_status(tmp.path()).unwrap();
+
+        // handle_status must clean up stale PID file (is_process_alive(u32::MAX) = false)
+        assert!(!pid_path.exists(), "stale pid file should be removed by handle_status");
     }
 }
