@@ -31,9 +31,9 @@ pub(crate) fn is_process_alive(pid: u32) -> bool {
     {
         use nix::sys::signal;
         use nix::unistd::Pid;
-        // PIDs larger than i32::MAX would wrap to negative values (e.g. -1),
-        // which have special semantics in kill(2). Treat them as non-existent.
-        if pid > i32::MAX as u32 {
+        // PID 0 means the whole process group; PIDs > i32::MAX wrap to negative
+        // values (e.g. -1) — both have special semantics in kill(2). Reject them.
+        if pid == 0 || pid > i32::MAX as u32 {
             return false;
         }
         // kill(pid, 0) checks process existence without sending a signal
@@ -97,6 +97,12 @@ pub fn handle_stop(project_root: &Path) -> anyhow::Result<()> {
             println!("ℹ️  No hay PID file. sentinel monitor no está corriendo como daemon.");
         }
         Some(pid) => {
+            // Guard: PIDs outside i32 range cannot be valid process IDs.
+            if pid > i32::MAX as u32 {
+                eprintln!("⚠️  PID {} no es válido. Limpiando PID file.", pid);
+                let _ = std::fs::remove_file(&pid_path);
+                return Ok(());
+            }
             #[cfg(unix)]
             {
                 use nix::sys::signal::{self, Signal};
@@ -616,6 +622,7 @@ mod tests {
         assert!(!is_process_alive(u32::MAX));
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_handle_status_removes_stale_pid_file() {
         let tmp = TempDir::new().unwrap();

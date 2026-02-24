@@ -19,6 +19,16 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::sync::{Arc, Mutex};
 
+/// Convert a format string to (json_mode, sarif_mode) flags.
+/// Case-insensitive.
+pub(crate) fn format_to_mode(format: &str) -> (bool, bool) {
+    let lower = format.to_lowercase();
+    let json_mode = lower == "json";
+    let sarif_mode = lower == "sarif";
+    (json_mode, sarif_mode)
+}
+
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ReviewRecord {
     pub timestamp: String,
@@ -389,9 +399,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
     match subcommand {
         ProCommands::Check { target, format } => {
             let path = agent_context.project_root.join(&target);
-            let fmt = format.to_lowercase();
-            let json_mode = fmt == "json";
-            let sarif_mode = fmt == "sarif";
+            let (json_mode, sarif_mode) = format_to_mode(&format);
 
             if !path.exists() {
                 if json_mode {
@@ -3058,21 +3066,29 @@ mod batching_tests {
     }
 
     #[test]
-    fn test_check_json_mode_flag_detection() {
-        // Verify that format == "json" activates json_mode
-        let fmt = "json".to_string();
-        let json_mode = fmt.to_lowercase() == "json";
-        assert!(json_mode, "--format json should activate json_mode");
-
-        let fmt2 = "text".to_string();
-        let json_mode2 = fmt2.to_lowercase() == "json";
-        assert!(!json_mode2, "--format text should not activate json_mode");
+    fn test_format_to_mode_json() {
+        let (json, sarif) = super::format_to_mode("json");
+        assert!(json);
+        assert!(!sarif);
     }
 
     #[test]
-    fn test_sarif_mode_flag_detection() {
-        let fmt = "sarif".to_string();
-        let sarif_mode = fmt.to_lowercase() == "sarif";
-        assert!(sarif_mode, "--format sarif should activate sarif_mode");
+    fn test_format_to_mode_sarif() {
+        let (json, sarif) = super::format_to_mode("sarif");
+        assert!(!json);
+        assert!(sarif);
+    }
+
+    #[test]
+    fn test_format_to_mode_text() {
+        let (json, sarif) = super::format_to_mode("text");
+        assert!(!json);
+        assert!(!sarif);
+    }
+
+    #[test]
+    fn test_format_to_mode_case_insensitive() {
+        let (json, _) = super::format_to_mode("JSON");
+        assert!(json, "format detection must be case-insensitive");
     }
 }
