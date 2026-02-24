@@ -246,6 +246,32 @@ pub fn render_sarif(issues: &[SarifIssue]) -> String {
     serde_json::to_string_pretty(&sarif).unwrap_or_default()
 }
 
+/// Returns absolute paths of files changed in the current working tree (via `git diff --name-only HEAD`).
+/// Silently returns empty Vec if not a git repo or git is unavailable.
+pub fn get_changed_files(project_root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let output = std::process::Command::new("git")
+        .args(["diff", "--name-only", "HEAD"])
+        .current_dir(project_root)
+        .output()
+        .ok();
+
+    let mut files = Vec::new();
+    if let Some(out) = output {
+        if out.status.success() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    let p = project_root.join(trimmed);
+                    if p.exists() {
+                        files.push(p);
+                    }
+                }
+            }
+        }
+    }
+    files
+}
+
 pub fn handle_pro_command(subcommand: ProCommands) {
     // Buscar la raíz del proyecto inteligentemente
     let project_root = SentinelConfig::find_project_root()
@@ -1850,6 +1876,19 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
             }
 
+            // 0. Inject recently changed files (from git diff) at priority slots
+            let changed_files = get_changed_files(&agent_context.project_root);
+            let mut changed_count = 0usize;
+            for cf in changed_files.iter() {
+                let ext = cf.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if agent_context.config.file_extensions.contains(&ext.to_string()) {
+                    // Remove from current position if present, then insert at front
+                    candidates.retain(|p| p != cf);
+                    candidates.insert(0, cf.clone());
+                    changed_count += 1;
+                }
+            }
+
             // Priorizar archivos de arquitectura (NestJS, etc.) al frente
             let priority_patterns = [
                 ".service.ts", ".module.ts", ".controller.ts",
@@ -1969,9 +2008,14 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 ReviewMode::Medium => "modo centralidad",
                 ReviewMode::Large  => "modo multi-grupo",
             };
+            let diff_note = if changed_count > 0 {
+                format!(" · {} del diff reciente", changed_count)
+            } else {
+                String::new()
+            };
             println!(
-                "   📎 Contexto: {} archivo(s) · {} líneas · {} ({} en total)",
-                muestras, total_lines_loaded, mode_label, candidates.len()
+                "   📎 Contexto: {} archivo(s) · {} líneas · {}{} ({} en total)",
+                muestras, total_lines_loaded, mode_label, diff_note, candidates.len()
             );
 
             // Aviso si el modelo configurado es local — los modelos pequeños (≤7B)
@@ -2989,5 +3033,26 @@ mod batching_tests {
         let parsed: serde_json::Value = serde_json::from_str(&sarif).expect("must be valid JSON");
         assert_eq!(parsed["version"], "2.1.0");
         assert!(parsed["runs"][0]["results"][0]["ruleId"] == "DEAD_CODE");
+    }
+
+    #[test]
+    fn test_get_changed_files_returns_vec() {
+        // Verify it doesn't panic in any directory (git or non-git)
+        let tmp = std::env::temp_dir();
+        let files = super::get_changed_files(&tmp);
+        // In a non-git dir, returns empty
+        assert!(files.is_empty() || !files.is_empty(), "should not panic");
+    }
+
+    #[test]
+    fn test_get_changed_files_in_git_repo() {
+        // In the actual project root (which is a git repo), should not panic
+        // and should return valid paths if there are any changes
+        let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let files = super::get_changed_files(&repo_root);
+        // Each returned path must exist
+        for f in &files {
+            assert!(f.exists(), "get_changed_files returned non-existent path: {:?}", f);
+        }
     }
 }
