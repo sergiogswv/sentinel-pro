@@ -694,7 +694,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
         }
         ProCommands::Analyze { file } => {
             let path = agent_context.project_root.join(&file);
-            println!("\n🔍 Analizando: {}", file.cyan().bold());
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!("\n🔍 Analizando: {}", file.cyan().bold());
+            }
 
             // Leer contenido del archivo
             let content = match std::fs::read_to_string(&path) {
@@ -720,7 +722,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
             pb_static.finish_and_clear();
 
             if !static_violations.is_empty() {
-                println!("{}", "🚩 VIOLACIONES ESTÁTICAS DETECTADAS:".red().bold());
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("{}", "🚩 VIOLACIONES ESTÁTICAS DETECTADAS:".red().bold());
+                }
                 for v in &static_violations {
                     let level_icon = match v.level {
                         RuleLevel::Error => "❌ ERROR".red(),
@@ -729,9 +733,13 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                     };
                     println!("   {} [{}]: {}", level_icon, v.rule_name.yellow(), v.message);
                 }
-                println!();
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!();
+                }
             } else {
-                println!("   ✅ Capa 1: No se detectaron violaciones estáticas.\n");
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("   ✅ Capa 1: No se detectaron violaciones estáticas.\n");
+                }
             }
 
             // --- CAPA 2: Análisis Semántico con IA ---
@@ -768,10 +776,16 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
 
             pb_ana.finish_and_clear();
 
+            if output_mode == crate::commands::OutputMode::Verbose {
+                eprintln!("[DEBUG] Processing file {} with analyzer", file);
+            }
+
             match result {
                 Ok(res) => {
-                    println!("{}", "🔍 ANÁLISIS COMPLETADO".bold().green());
-                    
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!("{}", "🔍 ANÁLISIS COMPLETADO".bold().green());
+                    }
+
                     // Mostrar reporte humano (sin el código JSON)
                     let report_only = crate::ai::utils::eliminar_bloques_codigo(&res.output);
                     println!("{}", report_only);
@@ -780,7 +794,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                     let json_str = crate::ai::utils::extraer_json(&res.output);
                     if let Ok(issues) = serde_json::from_str::<Vec<AuditIssue>>(&json_str) {
                          if !issues.is_empty() {
-                            println!("\n💡 Se detectaron {} acciones recomendadas.", issues.len().to_string().cyan());
+                            if output_mode != crate::commands::OutputMode::Quiet {
+                                println!("\n💡 Se detectaron {} acciones recomendadas.", issues.len().to_string().cyan());
+                            }
                             
                             let options: Vec<String> = issues.iter()
                                 .map(|i| format!("[{}] {} - {}", i.severity.to_uppercase(), i.title.bold(), i.description))
@@ -807,16 +823,20 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                                     println!("   ❌ No se pudo crear backup: {}. Abortando.", e);
                                     return;
                                 }
-                                println!(
-                                    "   🔙 Backup creado: {}",
-                                    backup_path.display().to_string().dimmed()
-                                );
+                                if output_mode != crate::commands::OutputMode::Quiet {
+                                    println!(
+                                        "   🔙 Backup creado: {}",
+                                        backup_path.display().to_string().dimmed()
+                                    );
 
-                                println!("\n🚀 Aplicando {} mejoras seleccionadas...", selected.len());
+                                    println!("\n🚀 Aplicando {} mejoras seleccionadas...", selected.len());
+                                }
 
                                 for &idx in &selected {
                                     let issue = &issues[idx];
-                                    println!("\n🛠️  Ejecutando: {}", issue.title.cyan().bold());
+                                    if output_mode != crate::commands::OutputMode::Quiet {
+                                        println!("\n🛠️  Ejecutando: {}", issue.title.cyan().bold());
+                                    }
 
                                     let current_content = std::fs::read_to_string(&path)
                                         .unwrap_or_else(|_| content.clone());
@@ -852,7 +872,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                                                 if let Err(e) = std::fs::write(&path, code) {
                                                     println!("   ❌ Error al guardar: {}", e);
                                                 } else {
-                                                    println!("   ✅ '{}' aplicada.", issue.title.green());
+                                                    if output_mode != crate::commands::OutputMode::Quiet {
+                                                        println!("   ✅ '{}' aplicada.", issue.title.green());
+                                                    }
                                                     let mut s = agent_context.stats.lock().unwrap();
                                                     s.total_analisis += 1;
                                                     s.sugerencias_aplicadas += 1;
@@ -861,30 +883,40 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                                                 }
                                             }
                                             Some(_) => {
-                                                println!(
-                                                    "   ⚠️  '{}': respuesta truncada, saltando.",
-                                                    issue.title
-                                                );
+                                                if output_mode != crate::commands::OutputMode::Quiet {
+                                                    println!(
+                                                        "   ⚠️  '{}': respuesta truncada, saltando.",
+                                                        issue.title
+                                                    );
+                                                }
                                             }
                                             None => {
-                                                println!(
-                                                    "   ⚠️  '{}': sin código generado, saltando.",
-                                                    issue.title
-                                                );
+                                                if output_mode != crate::commands::OutputMode::Quiet {
+                                                    println!(
+                                                        "   ⚠️  '{}': sin código generado, saltando.",
+                                                        issue.title
+                                                    );
+                                                }
                                             }
                                         }
                                     }
                                 }
-                                println!("\n✨ Mejoras procesadas. Backup disponible si necesitas revertir.");
+                                if output_mode != crate::commands::OutputMode::Quiet {
+                                    println!("\n✨ Mejoras procesadas. Backup disponible si necesitas revertir.");
+                                }
                             }
                          }
                     } else {
                         let trimmed = json_str.trim();
                         if trimmed.is_empty() || trimmed == "[]" {
-                            println!("\n   ℹ️  El análisis no identificó acciones automatizables.");
+                            if output_mode != crate::commands::OutputMode::Quiet {
+                                println!("\n   ℹ️  El análisis no identificó acciones automatizables.");
+                            }
                         } else {
-                            println!("\n   ⚠️  El AI no devolvió el JSON de acciones en el formato esperado.");
-                            println!("   ℹ️  El análisis de texto está completo arriba — revisa las sugerencias manualmente.");
+                            if output_mode != crate::commands::OutputMode::Quiet {
+                                println!("\n   ⚠️  El AI no devolvió el JSON de acciones en el formato esperado.");
+                                println!("   ℹ️  El análisis de texto está completo arriba — revisa las sugerencias manualmente.");
+                            }
                             if std::env::var("SENTINEL_DEBUG").is_ok() {
                                 println!("   [debug] json_str: {}", &json_str[..json_str.len().min(200)]);
                             }
@@ -897,8 +929,14 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
             }
         }
         ProCommands::Report { format } => {
-            println!("\n📊 Generando Reporte de Calidad del Proyecto...");
-            
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!("\n📊 Generando Reporte de Calidad del Proyecto...");
+            }
+
+            if output_mode == crate::commands::OutputMode::Verbose {
+                eprintln!("[DEBUG] Generating quality report with {} format", format);
+            }
+
             let mut rule_engine = crate::rules::engine::RuleEngine::new();
             if let Some(ref db) = agent_context.index_db {
                 rule_engine = rule_engine.with_index_db(Arc::clone(db));
@@ -986,7 +1024,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                 let json_output = serde_json::to_string_pretty(&report_data).unwrap();
                 let output_path = agent_context.project_root.join("sentinel-report.json");
                 std::fs::write(&output_path, json_output).expect("Error al escribir reporte JSON");
-                println!("✅ Reporte JSON generado en: {}", output_path.display().to_string().cyan());
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("✅ Reporte JSON generado en: {}", output_path.display().to_string().cyan());
+                }
             } else if format == "html" {
                  let html_template = format!(
                      "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Sentinel Report - {project}</title>\
@@ -1040,13 +1080,17 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                          msg = v["message"].as_str().unwrap()
                      ));
                  }
-                 let final_html = format!("{}{}{}</tbody></table></div><p style='text-align: center; color: #a0aec0; font-size: 13px;'>Generado por Sentinel Pro • {date}</p></body></html>", 
+                 let final_html = format!("{}{}{}</tbody></table></div><p style='text-align: center; color: #a0aec0; font-size: 13px;'>Generado por Sentinel Pro • {date}</p></body></html>",
                      html_template, rows, "", date = chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
                  let output_path = agent_context.project_root.join("sentinel-report.html");
                  std::fs::write(&output_path, final_html).expect("Error al escribir reporte HTML");
-                 println!("✅ Reporte HTML generado en: {}", output_path.display().to_string().cyan());
+                 if output_mode != crate::commands::OutputMode::Quiet {
+                     println!("✅ Reporte HTML generado en: {}", output_path.display().to_string().cyan());
+                 }
             } else {
-                println!("⚠️ Formato '{}' no soportado. Usa json o html.", format);
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("⚠️ Formato '{}' no soportado. Usa json o html.", format);
+                }
             }
         }
         ProCommands::Split { file } => {
@@ -1092,13 +1136,19 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
 
             pb.finish_and_clear();
 
+            if output_mode == crate::commands::OutputMode::Verbose {
+                eprintln!("[DEBUG] Splitting file {}", file);
+            }
+
             match result {
                 Ok(res) if res.success => {
-                    println!("{}", "✂️  DIVISIÓN COMPLETADA".bold().green());
-                    println!(
-                        "   🔙 Backup en: {}",
-                        backup_path.display().to_string().dimmed()
-                    );
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!("{}", "✂️  DIVISIÓN COMPLETADA".bold().green());
+                        println!(
+                            "   🔙 Backup en: {}",
+                            backup_path.display().to_string().dimmed()
+                        );
+                    }
                     println!("\n{}", res.output);
                     {
                         let mut s = agent_context.stats.lock().unwrap();
@@ -1107,7 +1157,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                     }
                 }
                 Ok(res) => {
-                    println!("   ℹ️  {}", res.output);
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!("   ℹ️  {}", res.output);
+                    }
                 }
                 Err(e) => {
                     println!("{} {}", "❌ Error al dividir:".bold().red(), e);
@@ -1155,16 +1207,24 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
 
             pb.finish_and_clear();
 
+            if output_mode == crate::commands::OutputMode::Verbose {
+                eprintln!("[DEBUG] Fixing bugs in file {}", file);
+            }
+
             match result {
                 Ok(res) => {
-                    println!("{}", "🩹 CORRECCIÓN COMPLETADA".bold().green());
-                    println!("   🔙 Backup en: {}", backup_path.display().to_string().dimmed());
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!("{}", "🩹 CORRECCIÓN COMPLETADA".bold().green());
+                        println!("   🔙 Backup en: {}", backup_path.display().to_string().dimmed());
+                    }
 
                     match res.artifacts.first() {
                         Some(code) if code.len() >= original_len / 3 => {
                             match std::fs::write(&path, code) {
                                 Ok(_) => {
-                                    println!("   💾 Cambios aplicados a: {}", file.cyan());
+                                    if output_mode != crate::commands::OutputMode::Quiet {
+                                        println!("   💾 Cambios aplicados a: {}", file.cyan());
+                                    }
                                     let mut s = agent_context.stats.lock().unwrap();
                                     s.total_analisis += 1;
                                     s.sugerencias_aplicadas += 1;
@@ -1176,11 +1236,15 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                             }
                         }
                         Some(_) => {
-                            println!("   ⚠️  Respuesta truncada (muy corta vs original). Sin cambios.");
-                            println!("   📄 Archivo original intacto.");
+                            if output_mode != crate::commands::OutputMode::Quiet {
+                                println!("   ⚠️  Respuesta truncada (muy corta vs original). Sin cambios.");
+                                println!("   📄 Archivo original intacto.");
+                            }
                         }
                         None => {
-                            println!("   ⚠️  El agente no retornó código. Sin cambios al archivo.");
+                            if output_mode != crate::commands::OutputMode::Quiet {
+                                println!("   ⚠️  El agente no retornó código. Sin cambios al archivo.");
+                            }
                         }
                     }
 
@@ -1188,12 +1252,18 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                 }
                 Err(e) => {
                     println!("{} {}", "❌ Error al corregir:".bold().red(), e);
-                    println!("   🔙 Backup disponible en: {}", backup_path.display().to_string().dimmed());
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!("   🔙 Backup disponible en: {}", backup_path.display().to_string().dimmed());
+                    }
                 }
             }
         }
          ProCommands::TestAll => {
             let pb = ui::crear_progreso("Escaneando archivos sin cobertura de tests...");
+
+            if output_mode == crate::commands::OutputMode::Verbose {
+                eprintln!("[DEBUG] Testing all files for coverage");
+            }
 
             let framework = &agent_context.config.framework;
 
@@ -1277,25 +1347,31 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
             pb.finish_and_clear();
 
             // Informar del framework detectado y filtrado
-            println!("\n{} {}", "🔍 Framework detectado:".dimmed(), framework.cyan().bold());
-            if archivos_filtrados_por_framework > 0 {
-                println!(
-                    "{}",
-                    format!(
-                        "   ℹ️  {} archivo(s) omitidos automáticamente ({}): no requieren tests unitarios en {}",
-                        archivos_filtrados_por_framework,
-                        sufijos_excluidos.join(", "),
-                        framework
-                    ).dimmed()
-                );
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!("\n{} {}", "🔍 Framework detectado:".dimmed(), framework.cyan().bold());
+                if archivos_filtrados_por_framework > 0 {
+                    println!(
+                        "{}",
+                        format!(
+                            "   ℹ️  {} archivo(s) omitidos automáticamente ({}): no requieren tests unitarios en {}",
+                            archivos_filtrados_por_framework,
+                            sufijos_excluidos.join(", "),
+                            framework
+                        ).dimmed()
+                    );
+                }
+                println!();
             }
-            println!();
 
             // 2. Mostrar resumen
             if archivos_sin_test.is_empty() {
-                println!("\n{}", "✅ ¡Todos los archivos fuente tienen cobertura de tests!".green().bold());
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("\n{}", "✅ ¡Todos los archivos fuente tienen cobertura de tests!".green().bold());
+                }
             } else {
-                println!("\n{}", format!("🧪 {} archivos sin cobertura de tests detectados:", archivos_sin_test.len()).bold().yellow());
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("\n{}", format!("🧪 {} archivos sin cobertura de tests detectados:", archivos_sin_test.len()).bold().yellow());
+                }
 
                 // --- Agrupar por sufijo de archivo ---
                 // Detectar el tipo compuesto: .service.ts, .controller.ts, etc.
@@ -1334,13 +1410,15 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                 }
 
                 // Mostrar listado agrupado
-                for (grupo, archivos) in &grupos {
-                    println!("\n  {} {} {} {}", "▸".cyan(), grupo.bold(), format!("({} archivos)", archivos.len()).dimmed(), "");
-                    for (ruta, _) in archivos {
-                        println!("      {}", ruta.dimmed());
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    for (grupo, archivos) in &grupos {
+                        println!("\n  {} {} {} {}", "▸".cyan(), grupo.bold(), format!("({} archivos)", archivos.len()).dimmed(), "");
+                        for (ruta, _) in archivos {
+                            println!("      {}", ruta.dimmed());
+                        }
                     }
+                    println!();
                 }
-                println!();
 
                 // Opciones de modo por grupo
                 let modo_opciones = ["⚡ Automático", "🎯 Manual", "⏭️  Omitir grupo"];
@@ -1349,7 +1427,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                 let mut omitidos = 0usize;
 
                 for (grupo, archivos) in &grupos {
-                    println!("{}", format!("── {} ({} archivos) ──", grupo, archivos.len()).bold().cyan());
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!("{}", format!("── {} ({} archivos) ──", grupo, archivos.len()).bold().cyan());
+                    }
 
                     let modo_idx = Select::with_theme(&ColorfulTheme::default())
                         .with_prompt("Modo para este grupo")
@@ -1359,7 +1439,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                         .unwrap_or(2); // default seguro: omitir
 
                     if modo_idx == 2 {
-                        println!("   ⏭️  Grupo omitido.\n");
+                        if output_mode != crate::commands::OutputMode::Quiet {
+                            println!("   ⏭️  Grupo omitido.\n");
+                        }
                         omitidos += archivos.len();
                         continue;
                     }
@@ -1368,7 +1450,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
 
                     for (i, (ruta, abs_path)) in archivos.iter().enumerate() {
                         if !modo_auto {
-                            println!("  [{}/{}] {}", (i + 1).to_string().yellow(), archivos.len(), ruta.cyan().bold());
+                            if output_mode != crate::commands::OutputMode::Quiet {
+                                println!("  [{}/{}] {}", (i + 1).to_string().yellow(), archivos.len(), ruta.cyan().bold());
+                            }
                             let generar = dialoguer::Confirm::new()
                                 .with_prompt("¿Generar test?")
                                 .default(true)
@@ -1376,12 +1460,16 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                                 .unwrap_or(false);
 
                             if !generar {
-                                println!("     ⏭️  Omitido.\n");
+                                if output_mode != crate::commands::OutputMode::Quiet {
+                                    println!("     ⏭️  Omitido.\n");
+                                }
                                 omitidos += 1;
                                 continue;
                             }
                         } else {
-                            println!("  [{}/{}] {}", (i + 1).to_string().yellow(), archivos.len(), ruta.cyan());
+                            if output_mode != crate::commands::OutputMode::Quiet {
+                                println!("  [{}/{}] {}", (i + 1).to_string().yellow(), archivos.len(), ruta.cyan());
+                            }
                         }
 
                         // Leer contenido (máx 120 líneas)
@@ -1422,10 +1510,12 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                                 let bloques = crate::ai::utils::extraer_todos_bloques(&res.output);
 
                                 if bloques.is_empty() {
-                                    println!("     ⚠️  El AI no generó bloques de código válidos (```).");
-                                    println!("     📄 Respuesta completa del AI:\n---\n{}\n---\n", res.output.dimmed());
-                                    if res.output.trim().is_empty() {
-                                        println!("     💡 Tip: La respuesta está vacía. Si persiste, intenta limpiar el caché con `pro clean-cache`.\n");
+                                    if output_mode != crate::commands::OutputMode::Quiet {
+                                        println!("     ⚠️  El AI no generó bloques de código válidos (```).");
+                                        println!("     📄 Respuesta completa del AI:\n---\n{}\n---\n", res.output.dimmed());
+                                        if res.output.trim().is_empty() {
+                                            println!("     💡 Tip: La respuesta está vacía. Si persiste, intenta limpiar el caché con `pro clean-cache`.\n");
+                                        }
                                     }
                                     continue;
                                 }
@@ -1436,7 +1526,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                                         let dest = agent_context.project_root.join(dest_rel);
 
                                         if dest.is_dir() {
-                                            println!("     ⚠️  Ruta es directorio, omitido: {}", dest_rel.yellow());
+                                            if output_mode != crate::commands::OutputMode::Quiet {
+                                                println!("     ⚠️  Ruta es directorio, omitido: {}", dest_rel.yellow());
+                                            }
                                             continue;
                                         }
 
@@ -1446,7 +1538,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
 
                                         match std::fs::write(&dest, codigo) {
                                             Ok(_) => {
-                                                println!("     ✅ {}", dest_rel.green());
+                                                if output_mode != crate::commands::OutputMode::Quiet {
+                                                    println!("     ✅ {}", dest_rel.green());
+                                                }
                                                 guardado = true;
                                                 generados += 1;
                                                 let mut s = agent_context.stats.lock().unwrap();
@@ -1456,23 +1550,33 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                                             Err(e) => println!("     ❌ Error al guardar '{}': {}", dest_rel, e),
                                         }
                                     } else {
-                                        println!("     ⚠️  Sin ruta de destino (primera línea debe ser // test/ruta/archivo.spec.ts)");
+                                        if output_mode != crate::commands::OutputMode::Quiet {
+                                            println!("     ⚠️  Sin ruta de destino (primera línea debe ser // test/ruta/archivo.spec.ts)");
+                                        }
                                     }
                                 }
                                 if !guardado {
-                                    println!("     ℹ️  No se guardó el test.");
+                                    if output_mode != crate::commands::OutputMode::Quiet {
+                                        println!("     ℹ️  No se guardó el test.");
+                                    }
                                 }
-                                println!();
+                                if output_mode != crate::commands::OutputMode::Quiet {
+                                    println!();
+                                }
                             }
                             Err(e) => println!("     ❌ Error: {}\n", e),
                         }
                     }
-                    println!();
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!();
+                    }
                 }
 
                 // Resumen final
-                println!("{}", "─".repeat(60).dimmed());
-                println!("{}", format!("🧪 Tests generados: {}  |  Omitidos: {}", generados, omitidos).bold());
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("{}", "─".repeat(60).dimmed());
+                    println!("{}", format!("🧪 Tests generados: {}  |  Omitidos: {}", generados, omitidos).bold());
+                }
                 if generados > 0 {
                     let run_tests = dialoguer::Confirm::new()
                         .with_prompt("¿Deseas ejecutar los tests ahora?")
@@ -1550,24 +1654,26 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                                     }
 
                                     // ── Mostrar resumen limpio ─────────────────────
-                                    println!("\n{}", "📊 Resultados de tests:".bold());
-                                    println!("   ✅ Pasaron:  {}", n_passed.to_string().green().bold());
-                                    if n_failed > 0 {
-                                        println!("   ❌ Fallaron: {}", n_failed.to_string().red().bold());
-                                    }
-                                    if n_skipped > 0 {
-                                        println!("   ⏭️  Omitidos: {}", n_skipped.to_string().yellow());
-                                    }
-
-                                    if !suites_fallidas.is_empty() {
-                                        println!("\n{}", "   Suites con fallos:".red().bold());
-                                        for s in &suites_fallidas {
-                                            println!("      • {}", s.red());
+                                    if output_mode != crate::commands::OutputMode::Quiet {
+                                        println!("\n{}", "📊 Resultados de tests:".bold());
+                                        println!("   ✅ Pasaron:  {}", n_passed.to_string().green().bold());
+                                        if n_failed > 0 {
+                                            println!("   ❌ Fallaron: {}", n_failed.to_string().red().bold());
                                         }
-                                    }
+                                        if n_skipped > 0 {
+                                            println!("   ⏭️  Omitidos: {}", n_skipped.to_string().yellow());
+                                        }
 
-                                    if o.status.success() || n_failed == 0 {
-                                        println!("\n{}", "✅ Todos los tests pasaron correctamente.".green().bold());
+                                        if !suites_fallidas.is_empty() {
+                                            println!("\n{}", "   Suites con fallos:".red().bold());
+                                            for s in &suites_fallidas {
+                                                println!("      • {}", s.red());
+                                            }
+                                        }
+
+                                        if o.status.success() || n_failed == 0 {
+                                            println!("\n{}", "✅ Todos los tests pasaron correctamente.".green().bold());
+                                        }
                                     } else {
                                         println!();
                                         // ── Ofrecer auto-fix ──────────────────────
@@ -1637,49 +1743,68 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
             }
         }
 
-        ProCommands::Ml { subcommand } => match subcommand {
+        ProCommands::Ml { subcommand } => {
+            if output_mode == crate::commands::OutputMode::Verbose {
+                eprintln!("[DEBUG] Running ML command");
+            }
+            match subcommand {
             crate::commands::MlCommands::Download => {
                 let start = std::time::Instant::now();
                 match crate::ml::embeddings::EmbeddingModel::new() {
                     Ok(_) => {
                         let duration = start.elapsed();
-                        println!(
-                            "{} ({}s)",
-                            "✅ Modelo descargado y verificado correctamente.".green(),
-                            duration.as_secs()
-                        );
+                        if output_mode != crate::commands::OutputMode::Quiet {
+                            println!(
+                                "{} ({}s)",
+                                "✅ Modelo descargado y verificado correctamente.".green(),
+                                duration.as_secs()
+                            );
+                        }
                     }
                     Err(e) => println!("{} {}", "❌ Error al descargar modelo:".red(), e),
                 }
             }
             crate::commands::MlCommands::Test { text } => {
-                println!("{}", "🧠 Generando embeddings de prueba...".cyan());
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("{}", "🧠 Generando embeddings de prueba...".cyan());
+                }
                 match crate::ml::embeddings::EmbeddingModel::new() {
                     Ok(model) => match model.embed_one(&text) {
                         Ok(emb) => {
-                            println!("{}", "✅ Operación exitosa.".green());
-                            println!("   📝 Texto: \"{}\"", text);
-                            println!("   📊 Dimensión: {}", emb.len());
-                            println!("   🔢 Vector [0..5]: {:?}", &emb[0..5]);
+                            if output_mode != crate::commands::OutputMode::Quiet {
+                                println!("{}", "✅ Operación exitosa.".green());
+                                println!("   📝 Texto: \"{}\"", text);
+                                println!("   📊 Dimensión: {}", emb.len());
+                                println!("   🔢 Vector [0..5]: {:?}", &emb[0..5]);
+                            }
                         }
                         Err(e) => println!("{} {}", "❌ Error al generar embedding:".red(), e),
                     },
                     Err(e) => println!("{} {}", "❌ Error al cargar modelo:".red(), e),
                 }
             }
-        },
+        }
+        }
         ProCommands::CleanCache { target } => {
+            if output_mode == crate::commands::OutputMode::Verbose {
+                eprintln!("[DEBUG] Cleaning cache");
+            }
+
             let path_str = target.unwrap_or_else(|| ".".to_string());
             let target_path = agent_context.project_root.join(&path_str);
 
-            println!(
-                "🧹 {} en: {}...",
-                "Limpiando caché de Sentinel AI".cyan(),
-                path_str.bold()
-            );
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!(
+                    "🧹 {} en: {}...",
+                    "Limpiando caché de Sentinel AI".cyan(),
+                    path_str.bold()
+                );
+            }
             match crate::ai::limpiar_cache(&target_path) {
                 Ok(_) => {
-                    println!("   ✅ Caché limpiada correctamente.");
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!("   ✅ Caché limpiada correctamente.");
+                    }
                 }
                 Err(e) => {
                     println!("   ❌ Error al limpiar caché: {}", e);
@@ -1688,6 +1813,10 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
         }
         ProCommands::Workflow { name, file } => {
             use crate::agents::workflow::{TaskTemplate, Workflow, WorkflowEngine, WorkflowStep};
+
+            if output_mode == crate::commands::OutputMode::Verbose {
+                eprintln!("[DEBUG] Running workflow '{}'", name);
+            }
 
             let pb = ui::crear_progreso(&format!("Preparando workflow '{}'...", name));
 
@@ -1756,9 +1885,11 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
 
                 match result {
                     Ok(ctx) => {
-                        println!("{}", "\n✨ WORKFLOW COMPLETADO".bold().green());
-                        println!("   📄 Archivo final: {:?}", ctx.current_file);
-                        println!("   🔄 Pasos ejecutados: {}", ctx.step_results.len());
+                        if output_mode != crate::commands::OutputMode::Quiet {
+                            println!("{}", "\n✨ WORKFLOW COMPLETADO".bold().green());
+                            println!("   📄 Archivo final: {:?}", ctx.current_file);
+                            println!("   🔄 Pasos ejecutados: {}", ctx.step_results.len());
+                        }
                     }
                     Err(e) => {
                         println!("{} {}", "❌ Error en workflow:".bold().red(), e);
@@ -1766,26 +1897,36 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                 }
             } else {
                 pb.finish_and_clear();
-                println!("{} Workflow '{}' no encontrado.", "❌".red(), name);
-                println!("   Workflows disponibles: fix-and-verify, review-security");
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("{} Workflow '{}' no encontrado.", "❌".red(), name);
+                    println!("   Workflows disponibles: fix-and-verify, review-security");
+                }
             }
         }
         ProCommands::Review { history, diff } => {
+            if output_mode == crate::commands::OutputMode::Verbose {
+                eprintln!("[DEBUG] Generating review report");
+            }
+
             if history {
                 let records = load_review_records(&agent_context.project_root);
                 if records.is_empty() {
-                    println!("📋 No hay reviews guardados aún. Ejecuta `sentinel pro review` para generar el primero.");
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!("📋 No hay reviews guardados aún. Ejecuta `sentinel pro review` para generar el primero.");
+                    }
                 } else {
-                    println!("📋 Historial de reviews ({}):", records.len());
-                    for r in records.iter().rev().take(5) {
-                        let first_title = r.suggestions.first()
-                            .and_then(|s| s.get("title"))
-                            .and_then(|t| t.as_str())
-                            .unwrap_or("(sin sugerencias)");
-                        println!(
-                            "  {}  ·  {} sugerencia(s)  ·  \"{}\"",
-                            r.timestamp, r.suggestions.len(), first_title
-                        );
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!("📋 Historial de reviews ({}):", records.len());
+                        for r in records.iter().rev().take(5) {
+                            let first_title = r.suggestions.first()
+                                .and_then(|s| s.get("title"))
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("(sin sugerencias)");
+                            println!(
+                                "  {}  ·  {} sugerencia(s)  ·  \"{}\"",
+                                r.timestamp, r.suggestions.len(), first_title
+                            );
+                        }
                     }
                 }
                 return;
@@ -1794,28 +1935,32 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
             if diff {
                 let records = load_review_records(&agent_context.project_root);
                 if records.len() < 2 {
-                    println!("⚠️  Se necesitan al menos 2 reviews para comparar. Ejecuta `sentinel pro review` dos veces.");
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!("⚠️  Se necesitan al menos 2 reviews para comparar. Ejecuta `sentinel pro review` dos veces.");
+                    }
                 } else {
                     let prev = &records[records.len() - 2];
                     let last = &records[records.len() - 1];
                     let (resolved, added, persistent) = diff_reviews(&prev.suggestions, &last.suggestions);
-                    println!(
-                        "🔍 Comparando reviews ({} vs {}):",
-                        prev.timestamp, last.timestamp
-                    );
-                    if !resolved.is_empty() {
-                        println!("  ✅ Resueltas ({}):", resolved.len());
-                        for t in &resolved { println!("     \"{}\"", t); }
-                    }
-                    if !added.is_empty() {
-                        println!("  🆕 Nuevas ({}):", added.len());
-                        for t in &added { println!("     \"{}\"", t); }
-                    }
-                    if !persistent.is_empty() {
-                        println!("  ⏳ Persistentes ({}):", persistent.len());
-                        for t in persistent.iter().take(5) { println!("     \"{}\"", t); }
-                        if persistent.len() > 5 {
-                            println!("     ... y {} más", persistent.len() - 5);
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!(
+                            "🔍 Comparando reviews ({} vs {}):",
+                            prev.timestamp, last.timestamp
+                        );
+                        if !resolved.is_empty() {
+                            println!("  ✅ Resueltas ({}):", resolved.len());
+                            for t in &resolved { println!("     \"{}\"", t); }
+                        }
+                        if !added.is_empty() {
+                            println!("  🆕 Nuevas ({}):", added.len());
+                            for t in &added { println!("     \"{}\"", t); }
+                        }
+                        if !persistent.is_empty() {
+                            println!("  ⏳ Persistentes ({}):", persistent.len());
+                            for t in persistent.iter().take(5) { println!("     \"{}\"", t); }
+                            if persistent.len() > 5 {
+                                println!("     ... y {} más", persistent.len() - 5);
+                            }
                         }
                     }
                 }
@@ -2343,6 +2488,10 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
             let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
             let non_interactive = no_fix || json_mode || !is_tty;
 
+            if output_mode == crate::commands::OutputMode::Verbose {
+                eprintln!("[DEBUG] Auditing {} with concurrency={}", target, concurrency);
+            }
+
             let path = agent_context.project_root.join(&target);
             if !path.exists() {
                 println!("{} El destino '{}' no existe en el proyecto.", "❌".red(), target);
@@ -2393,7 +2542,7 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                 });
                 files_to_audit.reverse(); // newest first
                 files_to_audit.truncate(max_files);
-                if !json_mode {
+                if !json_mode && output_mode != crate::commands::OutputMode::Quiet {
                     println!(
                         "   ℹ️  Auditando {} de {} archivos (usa --max-files {} para todos)",
                         max_files, total_found, total_found
@@ -2401,7 +2550,7 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                 }
             }
 
-            if !json_mode {
+            if !json_mode && output_mode != crate::commands::OutputMode::Quiet {
                 println!(
                     "🔍 Iniciando Auditoría en {} archivo(s)...",
                     files_to_audit.len().to_string().cyan()
@@ -2460,7 +2609,7 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                 });
             }
 
-            if !json_mode {
+            if !json_mode && output_mode != crate::commands::OutputMode::Quiet {
                 println!(
                     "   Procesando {} batches ({} en paralelo)...",
                     batch_data_list.len(),
@@ -2601,23 +2750,29 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
 
             if all_issues.is_empty() {
                 if parse_failures > 0 && parse_failures == files_to_audit.len() {
-                    println!(
-                        "{} La auditoría no pudo procesar ningún archivo (fallos de formato AI).",
-                        "⚠️".yellow()
-                    );
-                    println!("   Intenta de nuevo o revisa la configuración del modelo.");
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!(
+                            "{} La auditoría no pudo procesar ningún archivo (fallos de formato AI).",
+                            "⚠️".yellow()
+                        );
+                        println!("   Intenta de nuevo o revisa la configuración del modelo.");
+                    }
                 } else if parse_failures > 0 {
-                    println!(
-                        "{} Sin issues en los archivos procesados ({} con errores de formato).",
-                        "✅".green(), parse_failures
-                    );
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!(
+                            "{} Sin issues en los archivos procesados ({} con errores de formato).",
+                            "✅".green(), parse_failures
+                        );
+                    }
                 } else {
-                    println!("{} No se detectaron problemas corregibles.", "✅".green());
+                    if output_mode != crate::commands::OutputMode::Quiet {
+                        println!("{} No se detectaron problemas corregibles.", "✅".green());
+                    }
                 }
                 return;
             }
 
-            if parse_failures > 0 {
+            if parse_failures > 0 && output_mode != crate::commands::OutputMode::Quiet {
                 println!(
                     "   ⚠️  {} archivo(s) no pudieron procesarse por formato AI incorrecto.",
                     parse_failures
@@ -2650,22 +2805,24 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                     };
                     println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
                 } else {
-                    println!(
-                        "\n📑 Auditoría: {} issues — 🔴 {} High  🟡 {} Medium  🟢 {} Low",
-                        all_issues.len(), n_high, n_medium, n_low
-                    );
-                    for issue in &all_issues {
-                        let rel_file = std::path::Path::new(&issue.file_path)
-                            .strip_prefix(&agent_context.project_root)
-                            .map(|p| p.display().to_string())
-                            .unwrap_or_else(|_| issue.file_path.clone());
+                    if output_mode != crate::commands::OutputMode::Quiet {
                         println!(
-                            "   [{}] {} — {} ({})",
-                            issue.severity.to_uppercase(),
-                            issue.title.bold(),
-                            issue.description,
-                            rel_file.cyan()
+                            "\n📑 Auditoría: {} issues — 🔴 {} High  🟡 {} Medium  🟢 {} Low",
+                            all_issues.len(), n_high, n_medium, n_low
                         );
+                        for issue in &all_issues {
+                            let rel_file = std::path::Path::new(&issue.file_path)
+                                .strip_prefix(&agent_context.project_root)
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_else(|_| issue.file_path.clone());
+                            println!(
+                                "   [{}] {} — {} ({})",
+                                issue.severity.to_uppercase(),
+                                issue.title.bold(),
+                                issue.description,
+                                rel_file.cyan()
+                            );
+                        }
                     }
                 }
                 if n_high > 0 {
@@ -2675,22 +2832,28 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                 return;
             }
 
-            println!(
-                "\n📑 Resumen de Auditoría ({} issues detectados):",
-                all_issues.len().to_string().bold().yellow()
-            );
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!(
+                    "\n📑 Resumen de Auditoría ({} issues detectados):",
+                    all_issues.len().to_string().bold().yellow()
+                );
+            }
 
             let display_issues = if all_issues.len() > 20 {
-                println!(
-                    "   ℹ️  Mostrando los primeros 20 de {} issues. Usa --format json para ver todos.",
-                    all_issues.len()
-                );
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!(
+                        "   ℹ️  Mostrando los primeros 20 de {} issues. Usa --format json para ver todos.",
+                        all_issues.len()
+                    );
+                }
                 &all_issues[..20]
             } else {
                 &all_issues[..]
             };
 
-            println!("\n📋 {} issues detectados. Revisando uno a uno:\n", display_issues.len());
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!("\n📋 {} issues detectados. Revisando uno a uno:\n", display_issues.len());
+            }
 
             use std::io::{BufRead, Write};
             let mut selected_indices: Vec<usize> = Vec::new();
@@ -2704,25 +2867,27 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| issue.file_path.clone());
 
-                println!("{}", "─".repeat(60));
-                println!(
-                    "Issue {}/{} · {} · {}",
-                    idx + 1,
-                    display_issues.len(),
-                    issue.severity.to_uppercase().bold(),
-                    rel_file.cyan()
-                );
-                println!("{}", issue.title.bold());
-                if !issue.description.is_empty() {
-                    println!("\n{}", issue.description);
-                }
-                if !issue.suggested_fix.is_empty() {
-                    println!("\n{}", "Fix sugerido:".dimmed());
-                    for line in issue.suggested_fix.lines() {
-                        println!("  {}", line.dimmed());
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("{}", "─".repeat(60));
+                    println!(
+                        "Issue {}/{} · {} · {}",
+                        idx + 1,
+                        display_issues.len(),
+                        issue.severity.to_uppercase().bold(),
+                        rel_file.cyan()
+                    );
+                    println!("{}", issue.title.bold());
+                    if !issue.description.is_empty() {
+                        println!("\n{}", issue.description);
                     }
+                    if !issue.suggested_fix.is_empty() {
+                        println!("\n{}", "Fix sugerido:".dimmed());
+                        for line in issue.suggested_fix.lines() {
+                            println!("  {}", line.dimmed());
+                        }
+                    }
+                    println!("\n[a]plicar  [s]altar  [S]altar todos  [q]salir");
                 }
-                println!("\n[a]plicar  [s]altar  [S]altar todos  [q]salir");
                 print!("> ");
                 std::io::stdout().flush().unwrap_or(());
 
@@ -2732,7 +2897,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                     "a" | "A" => selected_indices.push(idx),
                     "S"       => { skip_all = true; }
                     "q" | "Q" => {
-                        println!("   ⏭️  Operación cancelada.");
+                        if output_mode != crate::commands::OutputMode::Quiet {
+                            println!("   ⏭️  Operación cancelada.");
+                        }
                         return;
                     }
                     _ => {}
@@ -2740,11 +2907,15 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
             }
 
             if selected_indices.is_empty() {
-                println!("   ⏭️  Sin fixes seleccionados.");
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("   ⏭️  Sin fixes seleccionados.");
+                }
                 return;
             }
 
-            println!("\n🚀 Aplicando {} correcciones...", selected_indices.len());
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!("\n🚀 Aplicando {} correcciones...", selected_indices.len());
+            }
 
             for &idx in &selected_indices {
                 let issue = &all_issues[idx];
@@ -2753,11 +2924,13 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                     .strip_prefix(&agent_context.project_root)
                     .unwrap_or(file_path);
 
-                println!(
-                    "\n🛠️  Fixing '{}' in {}...",
-                    issue.title.bold(),
-                    rel_file.display().to_string().cyan()
-                );
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!(
+                        "\n🛠️  Fixing '{}' in {}...",
+                        issue.title.bold(),
+                        rel_file.display().to_string().cyan()
+                    );
+                }
 
                 // Backup
                 let backup_path = format!("{}.audit_bak", issue.file_path);
@@ -2786,7 +2959,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                             if let Err(e) = std::fs::write(file_path, code) {
                                 println!("   ❌ Error escribiendo: {}", e);
                             } else {
-                                println!("   ✅ Corregido.");
+                                if output_mode != crate::commands::OutputMode::Quiet {
+                                    println!("   ✅ Corregido.");
+                                }
                                 // Update Stats
                                 let mut s = agent_context.stats.lock().unwrap();
                                 s.total_analisis += 1;
@@ -2799,7 +2974,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
                 }
             }
 
-            println!("\n✨ Proceso de auditoría y corrección finalizado.");
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!("\n✨ Proceso de auditoría y corrección finalizado.");
+            }
         }
     }
 
