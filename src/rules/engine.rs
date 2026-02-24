@@ -1,12 +1,11 @@
 use crate::rules::{FrameworkDefinition, FrameworkRule, RuleViolation, RuleLevel};
-use crate::rules::static_analysis::{StaticAnalyzer, DeadCodeAnalyzer, UnusedImportsAnalyzer, ComplexityAnalyzer};
+use crate::rules::static_analysis::NamingAnalyzerWithFramework;
+use crate::rules::languages;
 use std::fs;
 use std::path::Path;
-use tree_sitter::Language;
 
 pub struct RuleEngine {
     pub framework_def: Option<FrameworkDefinition>,
-    analyzers: Vec<Box<dyn StaticAnalyzer + Send + Sync>>,
     pub index_db: Option<std::sync::Arc<crate::index::IndexDb>>,
 }
 
@@ -14,11 +13,6 @@ impl RuleEngine {
     pub fn new() -> Self {
         Self {
             framework_def: None,
-            analyzers: vec![
-                Box::new(DeadCodeAnalyzer::new()),
-                Box::new(UnusedImportsAnalyzer::new()),
-                Box::new(ComplexityAnalyzer::new()),
-            ],
             index_db: None,
         }
     }
@@ -40,23 +34,20 @@ impl RuleEngine {
 
         // 1. Capa de Análisis Estático (Layer 1 - Automática)
         let ext = _file_path.extension().and_then(|e: &std::ffi::OsStr| e.to_str()).unwrap_or("");
-        let language: Option<Language> = match ext {
-            "ts" | "tsx" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
-            "js" | "jsx" => Some(tree_sitter_javascript::LANGUAGE.into()),
-            _ => None,
-        };
-
-        if let Some(lang) = language {
-            for analyzer in &self.analyzers {
+        if let Some((lang, analyzers)) = languages::get_language_and_analyzers(ext) {
+            for analyzer in &analyzers {
                 violations.extend(analyzer.analyze(&lang, content));
             }
 
-            let framework = self.framework_def.as_ref()
-                .map(|f| f.framework.as_str())
-                .unwrap_or("typescript");
-            let naming_violations = crate::rules::static_analysis::NamingAnalyzerWithFramework::new(framework)
-                .analyze(&lang, content);
-            violations.extend(naming_violations);
+            // NamingAnalyzer: only for TS/JS (framework naming conventions)
+            if matches!(ext, "ts" | "tsx" | "js" | "jsx") {
+                let framework = self.framework_def.as_ref()
+                    .map(|f| f.framework.as_str())
+                    .unwrap_or("typescript");
+                let naming_violations = NamingAnalyzerWithFramework::new(framework)
+                    .analyze(&lang, content);
+                violations.extend(naming_violations);
+            }
         }
 
         // --- Análisis de Proyecto Cruzado (SI hay DB disponible) ---
