@@ -206,9 +206,9 @@ pub fn render_sarif(issues: &[SarifIssue]) -> String {
 
     let results_json: Vec<serde_json::Value> = issues.iter().map(|i| {
         let level = match i.severity.as_str() {
-            "error" => "error",
-            "note"  => "note",
-            _       => "warning",
+            "error"          => "error",
+            "note" | "info"  => "note",
+            _                => "warning",
         };
         let start_line = i.line.unwrap_or(1);
         serde_json::json!({
@@ -235,6 +235,7 @@ pub fn render_sarif(issues: &[SarifIssue]) -> String {
                 "driver": {
                     "name": "sentinel",
                     "version": env!("CARGO_PKG_VERSION"),
+                    "informationUri": "https://github.com/your-org/sentinel",
                     "rules": rules_json
                 }
             },
@@ -525,6 +526,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             });
 
             let mut json_issues: Vec<JsonIssue> = Vec::new();
+            let mut sarif_issues: Vec<SarifIssue> = Vec::new();
             let mut n_errors = 0usize;
             let mut n_warnings = 0usize;
             let mut n_infos = 0usize;
@@ -543,7 +545,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     RuleLevel::Info    => { n_infos    += 1; ("info",    "ℹ️  INFO ") }
                 };
 
-                if json_mode || sarif_mode {
+                if json_mode {
                     json_issues.push(JsonIssue {
                         file: v.file_path.clone(),
                         rule: v.rule_name.clone(),
@@ -551,7 +553,22 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                         message: v.message.clone(),
                         line: v.line,
                     });
-                } else {
+                }
+                if sarif_mode {
+                    let sev = match v.level {
+                        RuleLevel::Error   => "error",
+                        RuleLevel::Warning => "warning",
+                        RuleLevel::Info    => "note",
+                    };
+                    sarif_issues.push(SarifIssue {
+                        file: v.file_path.clone(),
+                        rule: v.rule_name.clone(),
+                        severity: sev.to_string(),
+                        message: v.message.clone(),
+                        line: v.line,
+                    });
+                }
+                if !json_mode && !sarif_mode {
                     let line_info = v.line.map(|l| format!(":{}", l)).unwrap_or_default();
                     println!("   {} [{}{}]: {}", icon.color(match v.level {
                         RuleLevel::Error   => "red",
@@ -585,13 +602,6 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             }
 
             if sarif_mode {
-                let sarif_issues: Vec<SarifIssue> = json_issues.iter().map(|j| SarifIssue {
-                    file: j.file.clone(),
-                    rule: j.rule.clone(),
-                    severity: j.severity.clone(),
-                    message: j.message.clone(),
-                    line: j.line,
-                }).collect();
                 println!("{}", render_sarif(&sarif_issues));
             } else if json_mode {
                 #[derive(serde::Serialize)]
@@ -2974,7 +2984,7 @@ mod batching_tests {
         assert!(sarif.contains("\"$schema\""), "must have schema");
         assert!(sarif.contains("\"2.1.0\""), "must have version");
         assert!(sarif.contains("DEAD_CODE"), "must include rule");
-        assert!(sarif.contains("23"), "must include line number");
+        assert!(sarif.contains("\"startLine\": 23"), "must include line number");
         // Verify valid JSON
         let parsed: serde_json::Value = serde_json::from_str(&sarif).expect("must be valid JSON");
         assert_eq!(parsed["version"], "2.1.0");
