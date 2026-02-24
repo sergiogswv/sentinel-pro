@@ -30,7 +30,8 @@ fn walk_extensions(
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        // Fix 5: use file_type() for symlink safety instead of path.is_dir()
+        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if !skip_dirs.contains(&name) {
                 walk_extensions(&path, depth + 1, max_depth, supported, skip_dirs, found);
@@ -45,9 +46,10 @@ fn walk_extensions(
 
 /// Runs `sentinel init` in `project_root`.
 /// Returns Err if config already exists and force == false.
-pub fn run_init(project_root: &Path, force: bool) -> anyhow::Result<()> {
-    let sentinel_dir = project_root.join(".sentinel");
-    let config_path = sentinel_dir.join("config.toml");
+// Fix 4: accept pre-detected extensions to avoid double walk
+pub fn run_init(project_root: &Path, force: bool, extensions: Vec<String>) -> anyhow::Result<()> {
+    // Fix 1: config goes at project root as .sentinelrc.toml
+    let config_path = project_root.join(".sentinelrc.toml");
 
     if config_path.exists() && !force {
         anyhow::bail!(
@@ -56,13 +58,13 @@ pub fn run_init(project_root: &Path, force: bool) -> anyhow::Result<()> {
         );
     }
 
-    std::fs::create_dir_all(&sentinel_dir)?;
+    // Still create .sentinel dir for other things (cache, models, etc.)
+    std::fs::create_dir_all(project_root.join(".sentinel"))?;
 
-    let extensions = detect_project_extensions(project_root);
     let ext_list = if extensions.is_empty() {
         vec!["ts".to_string(), "js".to_string()]
     } else {
-        extensions.clone()
+        extensions
     };
 
     let ext_toml = ext_list
@@ -71,11 +73,11 @@ pub fn run_init(project_root: &Path, force: bool) -> anyhow::Result<()> {
         .collect::<Vec<_>>()
         .join(", ");
 
+    // Fix 1: top-level TOML fields — no [sentinel] wrapper
     let config_content = format!(
         r#"# Sentinel Pro — Configuración del Proyecto
 # Generado por `sentinel init`
 
-[sentinel]
 file_extensions = [{ext_list}]
 test_patterns = ["**/*.spec.ts", "**/*.test.ts", "**/*.spec.js", "**/*.test.js"]
 
@@ -96,6 +98,7 @@ pub fn handle_init_command(project_root: &Path, force: bool) {
     println!("\n{}", "🚀 Sentinel Init".bold().green());
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
+    // Fix 4: detect once and pass to run_init
     let extensions = detect_project_extensions(project_root);
     if extensions.is_empty() {
         println!("   ℹ️  No se detectaron lenguajes soportados. Usando TypeScript por defecto.");
@@ -103,9 +106,10 @@ pub fn handle_init_command(project_root: &Path, force: bool) {
         println!("   🔍 Lenguajes detectados: {}", extensions.join(", ").cyan());
     }
 
-    match run_init(project_root, force) {
+    match run_init(project_root, force, extensions) {
         Ok(()) => {
-            let config_path = project_root.join(".sentinel/config.toml");
+            // Fix 2: show correct path .sentinelrc.toml
+            let config_path = project_root.join(".sentinelrc.toml");
             println!("   ✅ Configuración creada en: {}", config_path.display().to_string().cyan());
             println!("\n   {} Próximos pasos:", "💡".yellow());
             println!("      sentinel pro check src/    # análisis estático");
@@ -113,8 +117,8 @@ pub fn handle_init_command(project_root: &Path, force: bool) {
             println!("      sentinel pro review        # review arquitectónico con IA");
         }
         Err(e) => {
+            // Fix 3: removed duplicate --force hint; the error message already contains it
             eprintln!("   ❌ {}", e);
-            eprintln!("   💡 Usa --force para sobrescribir la configuración existente.");
         }
     }
 }
@@ -139,22 +143,25 @@ mod tests {
     #[test]
     fn test_init_creates_config_file() {
         let tmp = TempDir::new().unwrap();
-        run_init(tmp.path(), false).unwrap();
-        let config_path = tmp.path().join(".sentinel/config.toml");
-        assert!(config_path.exists(), "init should create .sentinel/config.toml");
+        // Fix 6: updated to pass extensions and assert on .sentinelrc.toml
+        run_init(tmp.path(), false, vec![]).unwrap();
+        let config_path = tmp.path().join(".sentinelrc.toml");
+        assert!(config_path.exists(), "init should create .sentinelrc.toml");
         let content = std::fs::read_to_string(&config_path).unwrap();
         assert!(content.contains("file_extensions"), "config must contain file_extensions");
         assert!(content.contains("rule_config"), "config must contain rule_config section");
+        // Ensure no [sentinel] wrapper
+        assert!(!content.contains("[sentinel]"), "config must NOT have a [sentinel] section");
     }
 
     #[test]
     fn test_init_does_not_overwrite_without_force() {
         let tmp = TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".sentinel")).unwrap();
-        let config_path = tmp.path().join(".sentinel/config.toml");
+        // Fix 6: config is at root, not in .sentinel/
+        let config_path = tmp.path().join(".sentinelrc.toml");
         std::fs::write(&config_path, "existing = true").unwrap();
 
-        let result = run_init(tmp.path(), false);
+        let result = run_init(tmp.path(), false, vec![]);
         assert!(result.is_err(), "init without force should fail if config exists");
         let content = std::fs::read_to_string(&config_path).unwrap();
         assert_eq!(content, "existing = true", "content must be unchanged");
@@ -163,11 +170,11 @@ mod tests {
     #[test]
     fn test_init_with_force_overwrites() {
         let tmp = TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".sentinel")).unwrap();
-        let config_path = tmp.path().join(".sentinel/config.toml");
+        // Fix 6: config is at root, not in .sentinel/
+        let config_path = tmp.path().join(".sentinelrc.toml");
         std::fs::write(&config_path, "old = true").unwrap();
 
-        run_init(tmp.path(), true).unwrap();
+        run_init(tmp.path(), true, vec![]).unwrap();
         let content = std::fs::read_to_string(&config_path).unwrap();
         assert!(content.contains("file_extensions"), "force should overwrite with new config");
     }
@@ -175,9 +182,9 @@ mod tests {
     #[test]
     fn test_init_defaults_to_ts_when_no_files() {
         let tmp = TempDir::new().unwrap();
-        // No source files at all
-        run_init(tmp.path(), false).unwrap();
-        let content = std::fs::read_to_string(tmp.path().join(".sentinel/config.toml")).unwrap();
+        // No source files at all; Fix 6: assert on .sentinelrc.toml
+        run_init(tmp.path(), false, vec![]).unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".sentinelrc.toml")).unwrap();
         assert!(content.contains("\"ts\""), "should default to ts when no files detected");
     }
 
@@ -190,5 +197,19 @@ mod tests {
         // Only ts file is inside node_modules — should NOT be detected
         let exts = detect_project_extensions(tmp.path());
         assert!(!exts.contains(&"ts".to_string()), "node_modules must be skipped");
+    }
+
+    #[test]
+    fn test_init_toml_is_top_level() {
+        let tmp = TempDir::new().unwrap();
+        run_init(tmp.path(), false, vec!["ts".to_string(), "go".to_string()]).unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".sentinelrc.toml")).unwrap();
+        // file_extensions must appear before any section header
+        let fe_pos = content.find("file_extensions").expect("file_extensions must be present");
+        let section_pos = content.find('[').expect("at least [rule_config] section must exist");
+        assert!(
+            fe_pos < section_pos,
+            "file_extensions must be top-level (before any [section])"
+        );
     }
 }
