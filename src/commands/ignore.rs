@@ -71,12 +71,17 @@ fn parse_sentinelignore_file(path: &Path) -> Vec<IgnoreEntry> {
 /// Scans project_root recursively for .sentinelignore files and parses entries
 pub fn load_directory_ignores(project_root: &Path) -> Vec<IgnoreEntry> {
     let mut entries = Vec::new();
-    collect_sentinelignore_files(project_root, &mut entries);
+    collect_sentinelignore_files(project_root, &mut entries, 0);
     entries
 }
 
-fn collect_sentinelignore_files(dir: &Path, entries: &mut Vec<IgnoreEntry>) {
+fn collect_sentinelignore_files(dir: &Path, entries: &mut Vec<IgnoreEntry>, depth: usize) {
     const SKIP_DIRS: &[&str] = &["node_modules", ".git", "target", "vendor", "dist", ".sentinel"];
+    const MAX_DEPTH: usize = 10;
+
+    if depth > MAX_DEPTH {
+        return;
+    }
 
     // Check for .sentinelignore in this dir
     let ignore_path = dir.join(".sentinelignore");
@@ -86,18 +91,34 @@ fn collect_sentinelignore_files(dir: &Path, entries: &mut Vec<IgnoreEntry>) {
     }
 
     // Recurse into subdirs
-    if let Ok(entries_iter) = std::fs::read_dir(dir) {
-        for entry in entries_iter.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("");
-                if !SKIP_DIRS.contains(&name) {
-                    collect_sentinelignore_files(&path, entries);
+    match std::fs::read_dir(dir) {
+        Ok(entries_iter) => {
+            for entry in entries_iter {
+                match entry {
+                    Ok(dir_entry) => {
+                        let path = dir_entry.path();
+
+                        // Skip symlinks to prevent cycles and escape
+                        if path.is_symlink() {
+                            continue;
+                        }
+
+                        if path.is_dir() {
+                            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                                if !SKIP_DIRS.contains(&name) {
+                                    collect_sentinelignore_files(&path, entries, depth + 1);
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Silently skip entries we cannot read (permission denied, etc.)
+                    }
                 }
             }
+        }
+        Err(_) => {
+            // Could not read directory - continue
         }
     }
 }
@@ -270,5 +291,71 @@ mod tests {
         assert_eq!(entries[0].rule, "DEAD_CODE");
         assert_eq!(entries[0].file, "src/foo.ts");
         assert_eq!(entries[0].symbol.as_deref(), Some("bar"));
+    }
+
+    #[test]
+    fn test_symlink_cycle_does_not_crash() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let link_path = tmp.path().join("self_link");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs;
+            let _ = fs::symlink(tmp.path(), &link_path);
+        }
+
+        // Should return without panic or infinite loop
+        let entries = load_directory_ignores(tmp.path());
+        assert!(entries.is_empty() || entries.len() > 0); // Either way is fine, just don't crash
+    }
+
+    #[test]
+    fn test_respects_max_recursion_depth() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let mut path = tmp.path().to_path_buf();
+
+        // Create 15-level structure to test MAX_DEPTH limit
+        for i in 0..15 {
+            path.push(format!("level_{}", i));
+            std::fs::create_dir_all(&path).unwrap();
+        }
+
+        // Add .sentinelignore at a deep level (beyond MAX_DEPTH=10)
+        std::fs::write(
+            tmp.path().join("level_0/level_1/level_2/level_3/level_4/level_5/level_6/level_7/level_8/level_9/level_10/.sentinelignore"),
+            "DEAD_CODE test.ts ignored\n"
+        ).unwrap();
+
+        let entries = load_directory_ignores(tmp.path());
+        // The entry at level 11 (beyond MAX_DEPTH 10) should NOT be loaded
+        let has_ignored = entries.iter().any(|e| e.file.contains("test.ts"));
+        assert!(!has_ignored, "Should not load entries beyond MAX_DEPTH=10");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_permission_denied_does_not_crash() {
+        use tempfile::TempDir;
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let restricted = tmp.path().join("no_read");
+        std::fs::create_dir(&restricted).unwrap();
+
+        std::fs::write(
+            restricted.join(".sentinelignore"),
+            "DEAD_CODE src/main.rs main\n"
+        ).unwrap();
+
+        // Remove read permissions
+        std::fs::set_permissions(&restricted, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Should not crash - just silently skip the unreadable directory
+        let _entries = load_directory_ignores(tmp.path());
+
+        // Cleanup - restore permissions
+        std::fs::set_permissions(&restricted, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 }
