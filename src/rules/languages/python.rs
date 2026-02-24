@@ -76,19 +76,25 @@ impl StaticAnalyzer for PythonUnusedImportsAnalyzer {
         };
         let root = tree.root_node();
 
-        // Match both: `import os` and `from os import path`
-        let query_str = r#"
-            (import_statement name: (dotted_name (identifier) @module))
-            (import_from_statement name: (dotted_name (identifier) @module))
-        "#;
-        let query = match Query::new(language, query_str) {
+        // Query 1: `import X` style — capture module name X
+        let q1_str = r#"(import_statement name: (dotted_name (identifier) @module))"#;
+        // Query 2: `from X import Y [as Z]` style — capture imported name Y (or alias Z)
+        let q2_str = r#"(import_from_statement names: (import_list [(identifier) @symbol (aliased_import alias: (identifier) @symbol)]))"#;
+
+        let q1 = match Query::new(language, q1_str) {
             Ok(q) => q,
             Err(_) => return violations,
         };
-        let mut cursor = QueryCursor::new();
-        let mut captures = cursor.captures(&query, root, source_code.as_bytes());
+        // Fallback: if from-import query fails, skip from-imports entirely (no false positives)
+        let q2 = match Query::new(language, q2_str) {
+            Ok(q) => Some(q),
+            Err(_) => None, // skip from-imports
+        };
 
-        while let Some((m, _)) = captures.next() {
+        // Check `import X` imports
+        let mut cursor1 = QueryCursor::new();
+        let mut captures1 = cursor1.captures(&q1, root, source_code.as_bytes());
+        while let Some((m, _)) = captures1.next() {
             for capture in m.captures {
                 let name = capture.node.utf8_text(source_code.as_bytes()).unwrap_or("");
                 if name.is_empty() { continue; }
@@ -103,6 +109,28 @@ impl StaticAnalyzer for PythonUnusedImportsAnalyzer {
                 }
             }
         }
+
+        // Check `from X import Y` imports — only if query compiled successfully
+        if let Some(q2) = q2 {
+            let mut cursor2 = QueryCursor::new();
+            let mut captures2 = cursor2.captures(&q2, root, source_code.as_bytes());
+            while let Some((m, _)) = captures2.next() {
+                for capture in m.captures {
+                    let name = capture.node.utf8_text(source_code.as_bytes()).unwrap_or("");
+                    if name.is_empty() { continue; }
+                    if count_word_occurrences(source_code, name) <= 1 {
+                        violations.push(RuleViolation {
+                            rule_name: "UNUSED_IMPORT".to_string(),
+                            message: format!("El import '{}' no parece usarse en este archivo.", name),
+                            level: RuleLevel::Warning,
+                            line: find_line_of(source_code, name),
+                            symbol: Some(name.to_string()),
+                        });
+                    }
+                }
+            }
+        }
+
         violations
     }
 }
@@ -170,7 +198,7 @@ impl StaticAnalyzer for PythonComplexityAnalyzer {
                 if line_count > 50 {
                     violations.push(RuleViolation {
                         rule_name: "FUNCTION_TOO_LONG".to_string(),
-                        message: format!("Función de {} líneas (máximo recomendado: 50).", line_count),
+                        message: format!("Función de {} líneas (máximo recomendado: 50). Considera dividirla.", line_count),
                         level: RuleLevel::Warning,
                         line: Some(func_node.start_position().row + 1),
                         symbol: None,
@@ -281,5 +309,22 @@ def complex_func(x):
         assert!(result.is_some(), "registry must return analyzers for .py files");
         let (_, analyzers) = result.unwrap();
         assert_eq!(analyzers.len(), 3, "Python should have 3 analyzers");
+    }
+
+    #[test]
+    fn test_python_from_import_checks_symbol_not_module() {
+        let src = r#"
+from os import path
+
+def main():
+    print(path.join("/tmp", "foo"))
+"#;
+        let lang = py_lang();
+        let violations = PythonUnusedImportsAnalyzer.analyze(&lang, src);
+        // `path` IS used, so no UNUSED_IMPORT should fire
+        assert!(
+            !violations.iter().any(|v| v.rule_name == "UNUSED_IMPORT"),
+            "from os import path where path is used should not be flagged, got: {:?}", violations
+        );
     }
 }
