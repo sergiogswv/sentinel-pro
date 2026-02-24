@@ -8,12 +8,40 @@ pub mod rules;
 
 use clap::{Parser, Subcommand};
 
+/// Output mode for commands: Normal, Quiet (errors only), or Verbose (debug info)
+#[derive(Debug, Clone, PartialEq)]
+pub enum OutputMode {
+    Normal,
+    Quiet,
+    Verbose,
+}
+
+/// Determine output mode from quiet and verbose flags.
+/// quiet takes precedence if both are set.
+pub fn get_output_mode(quiet: bool, verbose: bool) -> OutputMode {
+    if quiet {
+        OutputMode::Quiet
+    } else if verbose {
+        OutputMode::Verbose
+    } else {
+        OutputMode::Normal
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "sentinel")]
 #[command(about = "AI-Powered Code Monitor & Development Suite", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
+
+    /// Suppress all output except errors and exit codes (for CI/scripts)
+    #[arg(long, global = true)]
+    pub quiet: bool,
+
+    /// Show debug info: files processed, timings, queries
+    #[arg(long, global = true)]
+    pub verbose: bool,
 }
 
 #[derive(Subcommand)]
@@ -159,4 +187,18 @@ pub enum MlCommands {
         /// Texto a procesar
         text: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_output_mode_from_flags() {
+        assert_eq!(get_output_mode(true, false), OutputMode::Quiet);
+        assert_eq!(get_output_mode(false, true), OutputMode::Verbose);
+        assert_eq!(get_output_mode(false, false), OutputMode::Normal);
+        // quiet takes precedence
+        assert_eq!(get_output_mode(true, true), OutputMode::Quiet);
+    }
 }

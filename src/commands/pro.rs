@@ -282,12 +282,14 @@ pub fn get_changed_files(project_root: &std::path::Path) -> Vec<std::path::PathB
     files
 }
 
-pub fn handle_pro_command(subcommand: ProCommands) {
+pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
+    let output_mode = crate::commands::get_output_mode(quiet, verbose);
+
     // Buscar la raíz del proyecto inteligentemente
     let project_root = SentinelConfig::find_project_root()
         .unwrap_or_else(|| env::current_dir().expect("No se pudo obtener el directorio actual"));
 
-    if project_root != env::current_dir().unwrap_or_default() {
+    if output_mode != crate::commands::OutputMode::Quiet && project_root != env::current_dir().unwrap_or_default() {
         println!(
             "{} {}",
             "📂 Proyecto Activo:".cyan().bold(),
@@ -297,13 +299,15 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
     let config = SentinelConfig::load(&project_root).unwrap_or_else(|| {
         if !project_root.join(".sentinelrc.toml").exists() {
-            println!(
-                "{} {}",
-                "⚠️".yellow(),
-                "No se encontró configuración (.sentinelrc.toml) en este directorio ni en padres."
-                    .yellow()
-            );
-            println!("   Ejecuta 'sentinel' primero para configurar un proyecto.");
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!(
+                    "{} {}",
+                    "⚠️".yellow(),
+                    "No se encontró configuración (.sentinelrc.toml) en este directorio ni en padres."
+                        .yellow()
+                );
+                println!("   Ejecuta 'sentinel' primero para configurar un proyecto.");
+            }
         }
         SentinelConfig::default()
     });
@@ -351,7 +355,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
     let mut index_handle: Option<std::thread::JoinHandle<anyhow::Result<()>>> = None;
     if let Some(ref db) = agent_context.index_db {
         if !db.is_populated() {
-            if !json_mode_global {
+            if !json_mode_global && output_mode != crate::commands::OutputMode::Quiet {
                 println!(
                     "\n{} {}",
                     "🧠 Indexando proyecto por primera vez...".cyan(),
@@ -369,7 +373,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
     }
 
     // Stale-index warning: warn once if disk file count diverges significantly from index
-    if !json_mode_global {
+    if !json_mode_global && output_mode != crate::commands::OutputMode::Quiet {
         if let Some(ref db) = agent_context.index_db {
             if db.is_populated() {
                 let disk_count = count_project_files(
@@ -454,7 +458,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 return;
             }
 
-            if !json_mode && !sarif_mode {
+            if !json_mode && !sarif_mode && output_mode != crate::commands::OutputMode::Quiet {
                 // TS-first note: shown when no TS/JS files in target
                 let has_ts_js = files_to_check.iter().any(|f| {
                     matches!(
@@ -472,6 +476,16 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
                 println!("\n{} Capa 1 — Análisis Estático en {} archivo(s)...",
                     "⚡".cyan(), files_to_check.len());
+            }
+
+            if output_mode == crate::commands::OutputMode::Verbose && !json_mode && !sarif_mode {
+                println!("\n📂 Archivos procesados:");
+                for file_path in &files_to_check {
+                    let rel = file_path
+                        .strip_prefix(&agent_context.project_root)
+                        .unwrap_or(file_path);
+                    println!("   {}", rel.display());
+                }
             }
 
             let mut rule_engine = crate::rules::engine::RuleEngine::new();
@@ -661,13 +675,15 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     issues: json_issues,
                 };
                 println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
-            } else if n_errors == 0 && n_warnings == 0 && n_infos == 0 {
-                println!("\n✅ Sin problemas detectados en {} archivo(s).", files_to_check.len());
-            } else {
-                println!("\n🚩 {} error(s)  ⚠️  {} warning(s)  ℹ️  {} info(s)",
-                    n_errors.to_string().red().bold(),
-                    n_warnings.to_string().yellow(),
-                    n_infos.to_string().blue());
+            } else if output_mode != crate::commands::OutputMode::Quiet {
+                if n_errors == 0 && n_warnings == 0 && n_infos == 0 {
+                    println!("\n✅ Sin problemas detectados en {} archivo(s).", files_to_check.len());
+                } else {
+                    println!("\n🚩 {} error(s)  ⚠️  {} warning(s)  ℹ️  {} info(s)",
+                        n_errors.to_string().red().bold(),
+                        n_warnings.to_string().yellow(),
+                        n_infos.to_string().blue());
+                }
             }
 
             // Exit 1 si hay errores → CI falla el build

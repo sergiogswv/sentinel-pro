@@ -62,7 +62,7 @@ fn main() {
             commands::index::handle_index_command(rebuild, check);
         }
         Some(Commands::Pro { subcommand }) => {
-            commands::pro::handle_pro_command(subcommand);
+            commands::pro::handle_pro_command(subcommand, cli.quiet, cli.verbose);
         }
         Some(Commands::Doctor) => {
             let project_root = crate::config::SentinelConfig::find_project_root()
