@@ -1876,28 +1876,29 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
             }
 
-            // 0. Inject recently changed files (from git diff) at priority slots
+            // Build set of changed files (those matching configured extensions)
             let changed_files = get_changed_files(&agent_context.project_root);
-            let mut changed_count = 0usize;
-            for cf in changed_files.iter() {
-                let ext = cf.extension().and_then(|e| e.to_str()).unwrap_or("");
-                if agent_context.config.file_extensions.contains(&ext.to_string()) {
-                    // Remove from current position if present, then insert at front
-                    candidates.retain(|p| p != cf);
-                    candidates.insert(0, cf.clone());
-                    changed_count += 1;
-                }
-            }
+            let changed_set: std::collections::HashSet<std::path::PathBuf> = changed_files
+                .into_iter()
+                .filter(|cf| {
+                    let ext = cf.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    agent_context.config.file_extensions.contains(&ext.to_string())
+                })
+                .collect();
+            let changed_count = changed_set.len();
 
-            // Priorizar archivos de arquitectura (NestJS, etc.) al frente
+            // Unified 3-tier sort: changed files (0) > architecture patterns (1) > rest (2)
             let priority_patterns = [
                 ".service.ts", ".module.ts", ".controller.ts",
                 ".gateway.ts", ".repository.ts", ".entity.ts",
             ];
             candidates.sort_by_key(|p| {
-                let name = p.to_string_lossy();
-                let is_priority = priority_patterns.iter().any(|pat| name.ends_with(pat));
-                if is_priority { 0usize } else { 1usize }
+                if changed_set.contains(p) {
+                    0usize
+                } else {
+                    let name = p.to_string_lossy();
+                    if priority_patterns.iter().any(|pat| name.ends_with(pat)) { 1usize } else { 2usize }
+                }
             });
 
             let mut codigo_muestra = String::new();
