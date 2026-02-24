@@ -61,6 +61,7 @@ impl ProjectIndexBuilder {
         let language = match ext {
             "ts" | "tsx" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
             "js" | "jsx" => Some(tree_sitter_javascript::LANGUAGE.into()),
+            "go"         => Some(tree_sitter_go::LANGUAGE.into()),
             _ => None,
         };
 

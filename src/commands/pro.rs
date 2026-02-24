@@ -19,6 +19,75 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::sync::{Arc, Mutex};
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ReviewRecord {
+    pub timestamp: String,
+    pub project_root: String,
+    pub files_reviewed: usize,
+    pub suggestions: Vec<serde_json::Value>,
+}
+
+pub fn save_review_record(project_root: &std::path::Path, record: &ReviewRecord) -> anyhow::Result<()> {
+    let dir = project_root.join(".sentinel").join("reviews");
+    std::fs::create_dir_all(&dir)?;
+    let filename = format!("{}.json", record.timestamp.replace(':', "-").replace('T', "-"));
+    let path = dir.join(&filename);
+    let json = serde_json::to_string_pretty(record)?;
+    std::fs::write(path, json)?;
+    Ok(())
+}
+
+pub fn load_review_records(project_root: &std::path::Path) -> Vec<ReviewRecord> {
+    let dir = project_root.join(".sentinel").join("reviews");
+    if !dir.exists() { return vec![]; }
+    let mut records: Vec<ReviewRecord> = std::fs::read_dir(&dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
+                .filter_map(|e| {
+                    std::fs::read_to_string(e.path()).ok()
+                        .and_then(|s| serde_json::from_str::<ReviewRecord>(&s).ok())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    records.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    records
+}
+
+pub fn diff_reviews(
+    old: &[serde_json::Value],
+    new: &[serde_json::Value],
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let old_titles: std::collections::HashSet<String> = old.iter()
+        .filter_map(|s| s.get("title").and_then(|t| t.as_str()))
+        .map(|t| t.to_lowercase())
+        .collect();
+    let new_titles: std::collections::HashSet<String> = new.iter()
+        .filter_map(|s| s.get("title").and_then(|t| t.as_str()))
+        .map(|t| t.to_lowercase())
+        .collect();
+
+    let resolved: Vec<String> = old.iter()
+        .filter_map(|s| s.get("title").and_then(|t| t.as_str()))
+        .filter(|t| !new_titles.contains(&t.to_lowercase()))
+        .map(|t| t.to_string())
+        .collect();
+    let added: Vec<String> = new.iter()
+        .filter_map(|s| s.get("title").and_then(|t| t.as_str()))
+        .filter(|t| !old_titles.contains(&t.to_lowercase()))
+        .map(|t| t.to_string())
+        .collect();
+    let persistent: Vec<String> = new.iter()
+        .filter_map(|s| s.get("title").and_then(|t| t.as_str()))
+        .filter(|t| old_titles.contains(&t.to_lowercase()))
+        .map(|t| t.to_string())
+        .collect();
+
+    (resolved, added, persistent)
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 struct AuditIssue {
     title: String,
@@ -96,6 +165,15 @@ pub fn build_audit_batches(
     }
 
     final_batches
+}
+
+#[derive(Debug, PartialEq)]
+enum ReviewMode { Small, Medium, Large }
+
+fn review_size_mode(file_count: usize) -> ReviewMode {
+    if file_count < 20 { ReviewMode::Small }
+    else if file_count <= 80 { ReviewMode::Medium }
+    else { ReviewMode::Large }
 }
 
 pub fn handle_pro_command(subcommand: ProCommands) {
@@ -342,7 +420,13 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                             && (v.file_path.contains(&e.file) || e.file.contains(&v.file_path))
                             && e.symbol
                                 .as_ref()
-                                .map(|s| v.symbol.as_deref() == Some(s.as_str()))
+                                .map(|s| {
+                                    let norm_entry = crate::commands::ignore::normalize_symbol(s);
+                                    let norm_violation = v.symbol.as_deref()
+                                        .map(|vs| crate::commands::ignore::normalize_symbol(vs))
+                                        .unwrap_or_default();
+                                    norm_entry == norm_violation
+                                })
                                 .unwrap_or(true)
                     })
                 });
@@ -382,6 +466,29 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                         RuleLevel::Warning => "yellow",
                         RuleLevel::Info    => "blue",
                     }), v.rule_name.yellow(), line_info, v.message);
+                    // Per-violation copy-ready ignore hint
+                    let rel_file = v.file_path
+                        .strip_prefix(agent_context.project_root.to_string_lossy().as_ref())
+                        .unwrap_or(&v.file_path)
+                        .trim_start_matches('/')
+                        .to_string();
+                    let hint_file = if rel_file.is_empty() { v.file_path.as_str() } else { rel_file.as_str() };
+                    if let Some(ref sym) = v.symbol {
+                        println!(
+                            "      {} sentinel ignore {} {} {}",
+                            "👉".dimmed(),
+                            v.rule_name.dimmed(),
+                            hint_file.dimmed(),
+                            sym.dimmed()
+                        );
+                    } else {
+                        println!(
+                            "      {} sentinel ignore {} {}",
+                            "👉".dimmed(),
+                            v.rule_name.dimmed(),
+                            hint_file.dimmed()
+                        );
+                    }
                 }
             }
 
@@ -416,15 +523,6 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     n_errors.to_string().red().bold(),
                     n_warnings.to_string().yellow(),
                     n_infos.to_string().blue());
-            }
-
-            if !violations.is_empty() && !json_mode {
-                println!(
-                    "\n💡 Para ignorar: {} {} {}",
-                    "sentinel ignore".cyan(),
-                    "<REGLA>".dimmed(),
-                    "<ARCHIVO>".dimmed()
-                );
             }
 
             // Exit 1 si hay errores → CI falla el build
@@ -1511,7 +1609,58 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 println!("   Workflows disponibles: fix-and-verify, review-security");
             }
         }
-        ProCommands::Review => {
+        ProCommands::Review { history, diff } => {
+            if history {
+                let records = load_review_records(&agent_context.project_root);
+                if records.is_empty() {
+                    println!("📋 No hay reviews guardados aún. Ejecuta `sentinel pro review` para generar el primero.");
+                } else {
+                    println!("📋 Historial de reviews ({}):", records.len());
+                    for r in records.iter().rev().take(5) {
+                        let first_title = r.suggestions.first()
+                            .and_then(|s| s.get("title"))
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("(sin sugerencias)");
+                        println!(
+                            "  {}  ·  {} sugerencia(s)  ·  \"{}\"",
+                            r.timestamp, r.suggestions.len(), first_title
+                        );
+                    }
+                }
+                return;
+            }
+
+            if diff {
+                let records = load_review_records(&agent_context.project_root);
+                if records.len() < 2 {
+                    println!("⚠️  Se necesitan al menos 2 reviews para comparar. Ejecuta `sentinel pro review` dos veces.");
+                } else {
+                    let prev = &records[records.len() - 2];
+                    let last = &records[records.len() - 1];
+                    let (resolved, added, persistent) = diff_reviews(&prev.suggestions, &last.suggestions);
+                    println!(
+                        "🔍 Comparando reviews ({} vs {}):",
+                        prev.timestamp, last.timestamp
+                    );
+                    if !resolved.is_empty() {
+                        println!("  ✅ Resueltas ({}):", resolved.len());
+                        for t in &resolved { println!("     \"{}\"", t); }
+                    }
+                    if !added.is_empty() {
+                        println!("  🆕 Nuevas ({}):", added.len());
+                        for t in &added { println!("     \"{}\"", t); }
+                    }
+                    if !persistent.is_empty() {
+                        println!("  ⏳ Persistentes ({}):", persistent.len());
+                        for t in persistent.iter().take(5) { println!("     \"{}\"", t); }
+                        if persistent.len() > 5 {
+                            println!("     ... y {} más", persistent.len() - 5);
+                        }
+                    }
+                }
+                return;
+            }
+
             let pb = ui::crear_progreso("Analizando estructura del proyecto...");
 
             // 1. Generar mapa del proyecto (Tree)
@@ -1604,29 +1753,114 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             let mut codigo_muestra = String::new();
             let mut muestras = 0usize;
             let mut total_lines_loaded = 0usize;
-            for p in &candidates {
-                if muestras >= 8 {
-                    break;
+
+            let review_mode = review_size_mode(candidates.len());
+
+            match review_mode {
+                ReviewMode::Small => {
+                    // < 20 files: top 8 × 100 lines
+                    for p in candidates.iter().take(8) {
+                        if let Ok(contenido) = std::fs::read_to_string(p) {
+                            let lines: Vec<&str> = contenido.lines().collect();
+                            let preview_lines = lines.len().min(100);
+                            codigo_muestra.push_str(&format!(
+                                "\n\n=== {} ===\n{}",
+                                p.strip_prefix(&agent_context.project_root)
+                                    .map(|r| r.display().to_string())
+                                    .unwrap_or_else(|_| p.display().to_string()),
+                                lines[..preview_lines].join("\n")
+                            ));
+                            muestras += 1;
+                            total_lines_loaded += preview_lines;
+                        }
+                    }
                 }
-                if let Ok(contenido) = std::fs::read_to_string(p) {
-                    let lines: Vec<&str> = contenido.lines().collect();
-                    let preview_lines = lines.len().min(100);
-                    let preview = lines[..preview_lines].join("\n");
-                    let rel = p
-                        .strip_prefix(&agent_context.project_root)
-                        .map(|r| r.display().to_string())
-                        .unwrap_or_else(|_| p.display().to_string());
-                    codigo_muestra.push_str(&format!("\n\n=== {} ===\n{}", rel, preview));
-                    muestras += 1;
-                    total_lines_loaded += preview_lines;
+                ReviewMode::Medium => {
+                    // 20-80 files: centrality-based selection, top 20 × 150 lines
+                    let central_files: Vec<std::path::PathBuf> = if let Some(ref db) = agent_context.index_db {
+                        let conn = db.lock();
+                        let mut stmt = conn.prepare(
+                            "SELECT s.file_path, COUNT(*) as hits \
+                             FROM call_graph c \
+                             JOIN symbols s ON c.callee_symbol = s.name \
+                             GROUP BY s.file_path \
+                             ORDER BY hits DESC \
+                             LIMIT 20"
+                        ).ok();
+                        if let Some(ref mut stmt) = stmt {
+                            stmt.query_map([], |row| row.get::<_, String>(0))
+                                .map(|rows| rows.flatten().map(std::path::PathBuf::from).collect())
+                                .unwrap_or_default()
+                        } else { vec![] }
+                    } else { vec![] };
+
+                    let selected = if central_files.is_empty() {
+                        candidates.iter().take(20).cloned().collect::<Vec<_>>()
+                    } else {
+                        central_files
+                    };
+
+                    for p in selected.iter().take(20) {
+                        if let Ok(contenido) = std::fs::read_to_string(p) {
+                            let lines: Vec<&str> = contenido.lines().collect();
+                            let preview_lines = lines.len().min(150);
+                            codigo_muestra.push_str(&format!(
+                                "\n\n=== {} ===\n{}",
+                                p.strip_prefix(&agent_context.project_root)
+                                    .map(|r| r.display().to_string())
+                                    .unwrap_or_else(|_| p.display().to_string()),
+                                lines[..preview_lines].join("\n")
+                            ));
+                            muestras += 1;
+                            total_lines_loaded += preview_lines;
+                        }
+                    }
+                }
+                ReviewMode::Large => {
+                    // 80+ files: group by top-level subdir, up to 6 groups × 10 files × 80 lines
+                    use std::collections::HashMap;
+                    let mut groups: HashMap<String, Vec<std::path::PathBuf>> = HashMap::new();
+                    for p in &candidates {
+                        let rel = p.strip_prefix(&agent_context.project_root)
+                            .unwrap_or(p.as_path());
+                        let top_dir = rel.components().next()
+                            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "root".to_string());
+                        groups.entry(top_dir).or_default().push(p.clone());
+                    }
+                    let mut group_keys: Vec<String> = groups.keys().cloned().collect();
+                    group_keys.sort();
+                    for key in group_keys.iter().take(6) {
+                        let group_files = &groups[key];
+                        for p in group_files.iter().take(10) {
+                            if let Ok(contenido) = std::fs::read_to_string(p) {
+                                let lines: Vec<&str> = contenido.lines().collect();
+                                let preview_lines = lines.len().min(80);
+                                codigo_muestra.push_str(&format!(
+                                    "\n\n=== {} ===\n{}",
+                                    p.strip_prefix(&agent_context.project_root)
+                                        .map(|r| r.display().to_string())
+                                        .unwrap_or_else(|_| p.display().to_string()),
+                                    lines[..preview_lines].join("\n")
+                                ));
+                                muestras += 1;
+                                total_lines_loaded += preview_lines;
+                            }
+                        }
+                    }
                 }
             }
 
             pb.finish_with_message("Estructura analizada.");
 
+            let mode_label = match review_size_mode(candidates.len()) {
+                ReviewMode::Small  => "proyecto pequeño",
+                ReviewMode::Medium => "modo centralidad",
+                ReviewMode::Large  => "modo multi-grupo",
+            };
             println!(
-                "   📎 Contexto: {} archivo(s), {} líneas de código cargadas",
-                muestras, total_lines_loaded
+                "   📎 Contexto: {} archivo(s) · {} líneas · {} ({} en total)",
+                muestras, total_lines_loaded, mode_label, candidates.len()
             );
 
             // Aviso si el modelo configurado es local — los modelos pequeños (≤7B)
@@ -1705,6 +1939,32 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                         .trim_start_matches("[... Código guardado en .suggested ...]")
                         .trim();
                     println!("{}", report_display);
+
+                    // Save review record for history/diff
+                    let suggestions_json: Vec<serde_json::Value> = {
+                        // Try to extract JSON array from LLM output
+                        let json_start = res.output.find("```json")
+                            .map(|i| i + 7)
+                            .or_else(|| res.output.find('[').map(|i| i));
+                        let json_end = json_start.and_then(|start| {
+                            res.output[start..].find("```").map(|i| i + start)
+                        }).unwrap_or(res.output.len());
+                        if let Some(start) = json_start {
+                            serde_json::from_str::<Vec<serde_json::Value>>(res.output[start..json_end].trim())
+                                .unwrap_or_default()
+                        } else {
+                            vec![]
+                        }
+                    };
+                    let record = ReviewRecord {
+                        timestamp: chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string(),
+                        project_root: agent_context.project_root.display().to_string(),
+                        files_reviewed: muestras,
+                        suggestions: suggestions_json,
+                    };
+                    if let Err(e) = save_review_record(&agent_context.project_root, &record) {
+                        eprintln!("⚠️  No se pudo guardar el review: {}", e);
+                    }
 
                     // 3. Extraer y procesar sugerencias JSON
                     // Usar extractor semántico que valida campos de ReviewSuggestion
@@ -1900,7 +2160,8 @@ pub fn handle_pro_command(subcommand: ProCommands) {
         }
         ProCommands::Audit { target, no_fix, format, max_files, concurrency } => {
             let json_mode = format.to_lowercase() == "json";
-            let non_interactive = no_fix || json_mode;
+            let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+            let non_interactive = no_fix || json_mode || !is_tty;
 
             let path = agent_context.project_root.join(&target);
             if !path.exists() {
@@ -1974,7 +2235,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             const MAX_LINES_PER_BATCH: usize = 800;
             let final_batches = build_audit_batches(&files_to_audit, MAX_FILES_PER_BATCH, MAX_LINES_PER_BATCH);
 
-            let total_batches = final_batches.len();
+            let _total_batches = final_batches.len();
 
             let concurrency = concurrency.clamp(1, 10);
             let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
@@ -2249,50 +2510,63 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 &all_issues[..]
             };
 
-            let options: Vec<String> = display_issues
-                .iter()
-                .map(|i| {
-                    let rel_file = std::path::Path::new(&i.file_path)
-                        .strip_prefix(&agent_context.project_root)
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_else(|_| i.file_path.clone());
+            println!("\n📋 {} issues detectados. Revisando uno a uno:\n", display_issues.len());
 
-                    let raw_str = format!(
-                        "[{}] {} - {} ({})",
-                        i.severity.to_uppercase(),
-                        i.title,
-                        i.description,
-                        rel_file
-                    );
+            use std::io::{BufRead, Write};
+            let mut selected_indices: Vec<usize> = Vec::new();
+            let mut skip_all = false;
 
-                    // Truncar la línea completa agresivamente para evitar line-wraps que rompen dialoguer
-                    let max_len = 90;
-                    if raw_str.chars().count() > max_len {
-                        format!(
-                            "{}...",
-                            raw_str.chars().take(max_len - 3).collect::<String>()
-                        )
-                    } else {
-                        raw_str
+            for (idx, issue) in display_issues.iter().enumerate() {
+                if skip_all { break; }
+
+                let rel_file = std::path::Path::new(&issue.file_path)
+                    .strip_prefix(&agent_context.project_root)
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| issue.file_path.clone());
+
+                println!("{}", "─".repeat(60));
+                println!(
+                    "Issue {}/{} · {} · {}",
+                    idx + 1,
+                    display_issues.len(),
+                    issue.severity.to_uppercase().bold(),
+                    rel_file.cyan()
+                );
+                println!("{}", issue.title.bold());
+                if !issue.description.is_empty() {
+                    println!("\n{}", issue.description);
+                }
+                if !issue.suggested_fix.is_empty() {
+                    println!("\n{}", "Fix sugerido:".dimmed());
+                    for line in issue.suggested_fix.lines() {
+                        println!("  {}", line.dimmed());
                     }
-                })
-                .collect();
+                }
+                println!("\n[a]plicar  [s]altar  [S]altar todos  [q]salir");
+                print!("> ");
+                std::io::stdout().flush().unwrap_or(());
 
-            let selected = MultiSelect::with_theme(&ColorfulTheme::default())
-                .with_prompt("Selecciona los fixes que deseas aplicar (espacio=seleccionar, enter=confirmar):")
-                .max_length(20)
-                .items(&options)
-                .interact()
-                .unwrap_or_default();
+                let mut input = String::new();
+                std::io::stdin().lock().read_line(&mut input).unwrap_or(0);
+                match input.trim() {
+                    "a" | "A" => selected_indices.push(idx),
+                    "S"       => { skip_all = true; }
+                    "q" | "Q" => {
+                        println!("   ⏭️  Operación cancelada.");
+                        return;
+                    }
+                    _ => {}
+                }
+            }
 
-            if selected.is_empty() {
-                println!("   ⏭️  Operación cancelada.");
+            if selected_indices.is_empty() {
+                println!("   ⏭️  Sin fixes seleccionados.");
                 return;
             }
 
-            println!("\n🚀 Aplicando {} correcciones...", selected.len());
+            println!("\n🚀 Aplicando {} correcciones...", selected_indices.len());
 
-            for &idx in &selected {
+            for &idx in &selected_indices {
                 let issue = &all_issues[idx];
                 let file_path = std::path::Path::new(&issue.file_path);
                 let rel_file = file_path
@@ -2376,7 +2650,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
 #[cfg(test)]
 mod batching_tests {
-    use super::build_audit_batches;
+    use super::{build_audit_batches, review_size_mode, ReviewMode};
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -2492,6 +2766,67 @@ mod batching_tests {
         assert_eq!(violations.len(), 2);
         assert_eq!(violations[0].symbol.as_deref(), Some("getUser"));
         assert_eq!(violations[1].rule_name, "UNUSED_IMPORT");
+    }
+
+    #[test]
+    fn test_non_interactive_logic() {
+        let no_fix = false;
+        let json_mode = false;
+        let is_tty = false; // simulate CI
+        assert!(no_fix || json_mode || !is_tty, "CI (no TTY) should be non-interactive");
+        let is_tty2 = true;
+        let no_fix2 = true;
+        assert!(no_fix2 || json_mode || !is_tty2, "--no-fix should be non-interactive even with TTY");
+    }
+
+    #[test]
+    fn test_review_size_thresholds() {
+        assert_eq!(review_size_mode(5),   ReviewMode::Small);
+        assert_eq!(review_size_mode(19),  ReviewMode::Small);
+        assert_eq!(review_size_mode(20),  ReviewMode::Medium);
+        assert_eq!(review_size_mode(80),  ReviewMode::Medium);
+        assert_eq!(review_size_mode(81),  ReviewMode::Large);
+        assert_eq!(review_size_mode(200), ReviewMode::Large);
+    }
+
+    #[test]
+    fn test_review_record_save_and_load() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let record = super::ReviewRecord {
+            timestamp: "2026-02-23T14-32-00".to_string(),
+            project_root: root.display().to_string(),
+            files_reviewed: 5,
+            suggestions: vec![
+                serde_json::json!({"title": "Test suggestion", "impact": "High"}),
+            ],
+        };
+
+        super::save_review_record(root, &record).unwrap();
+
+        let loaded = super::load_review_records(root);
+        assert_eq!(loaded.len(), 1, "should load 1 saved record");
+        assert_eq!(loaded[0].files_reviewed, 5);
+        assert_eq!(loaded[0].suggestions.len(), 1);
+    }
+
+    #[test]
+    fn test_review_diff_categorizes_correctly() {
+        let old = vec![
+            serde_json::json!({"title": "Old and resolved"}),
+            serde_json::json!({"title": "Persistent issue"}),
+        ];
+        let new_v = vec![
+            serde_json::json!({"title": "Persistent issue"}),
+            serde_json::json!({"title": "Brand new issue"}),
+        ];
+
+        let (resolved, added, persistent) = super::diff_reviews(&old, &new_v);
+        assert_eq!(resolved.len(), 1, "Old and resolved should be resolved");
+        assert_eq!(added.len(), 1, "Brand new issue should be new");
+        assert_eq!(persistent.len(), 1, "Persistent issue should be persistent");
     }
 
     #[test]

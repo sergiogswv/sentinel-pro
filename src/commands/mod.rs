@@ -83,7 +83,14 @@ pub enum ProCommands {
     /// Ejecución de tests con asistencia de IA
     TestAll,
     /// Review completo del proyecto (Arquitectura y Coherencia)
-    Review,
+    Review {
+        /// Listar últimos N reviews guardados
+        #[arg(long, default_value_t = false)]
+        history: bool,
+        /// Comparar último review con el anterior
+        #[arg(long, default_value_t = false)]
+        diff: bool,
+    },
     /// Ejecutar un workflow definido
     Workflow {
         /// Nombre del workflow (ej: fix-and-verify)
