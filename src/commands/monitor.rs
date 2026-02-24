@@ -1,7 +1,8 @@
+use std::path::Path;
 use crate::config::SentinelConfig;
 use crate::rules::engine::RuleEngine;
 use crate::stats::SentinelStats;
-use crate::{ai, config, docs, files, git, index, tests, ui, business_logic_guard};
+use crate::{ai, config, docs, files, git, index, tests as test_runner, ui, business_logic_guard};
 use colored::*;
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use std::collections::HashMap;
@@ -10,6 +11,105 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Instant;
+
+pub fn write_pid_file(pid_path: &Path, pid: u32) -> anyhow::Result<()> {
+    if let Some(parent) = pid_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(pid_path, pid.to_string())?;
+    Ok(())
+}
+
+pub fn read_pid_file(pid_path: &Path) -> Option<u32> {
+    std::fs::read_to_string(pid_path)
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+}
+
+pub fn is_process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        use nix::sys::signal;
+        use nix::unistd::Pid;
+        // kill(pid, 0) checks process existence without sending a signal
+        signal::kill(Pid::from_raw(pid as i32), None).is_ok()
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+pub fn handle_daemon(project_root: &Path) -> anyhow::Result<()> {
+    let pid_path = project_root.join(".sentinel/monitor.pid");
+    if pid_path.exists() {
+        if let Some(pid) = read_pid_file(&pid_path) {
+            if is_process_alive(pid) {
+                println!("⚠️  sentinel monitor ya está corriendo (PID {}). Usa --stop para detenerlo.", pid);
+                return Ok(());
+            }
+        }
+    }
+
+    let exe = std::env::current_exe()?;
+    let child = std::process::Command::new(exe)
+        .arg("monitor")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+
+    let pid = child.id();
+    write_pid_file(&pid_path, pid)?;
+    println!("✅ sentinel monitor iniciado en background (PID {})", pid);
+    println!("   Detener: sentinel monitor --stop");
+    Ok(())
+}
+
+pub fn handle_stop(project_root: &Path) {
+    let pid_path = project_root.join(".sentinel/monitor.pid");
+    match read_pid_file(&pid_path) {
+        None => {
+            println!("ℹ️  No hay PID file. sentinel monitor no está corriendo como daemon.");
+        }
+        Some(pid) => {
+            #[cfg(unix)]
+            {
+                use nix::sys::signal::{self, Signal};
+                use nix::unistd::Pid;
+                match signal::kill(Pid::from_raw(pid as i32), Signal::SIGTERM) {
+                    Ok(_) => {
+                        let _ = std::fs::remove_file(&pid_path);
+                        println!("✅ sentinel monitor detenido (PID {})", pid);
+                    }
+                    Err(e) => {
+                        println!("⚠️  No se pudo enviar SIGTERM a PID {}: {}. Limpiando PID file.", pid, e);
+                        let _ = std::fs::remove_file(&pid_path);
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                println!("⚠️  --stop solo está soportado en sistemas Unix.");
+            }
+        }
+    }
+}
+
+pub fn handle_status(project_root: &Path) {
+    let pid_path = project_root.join(".sentinel/monitor.pid");
+    match read_pid_file(&pid_path) {
+        None => println!("ℹ️  sentinel monitor no está corriendo como daemon."),
+        Some(pid) => {
+            if is_process_alive(pid) {
+                println!("✅ sentinel monitor corriendo (PID {})", pid);
+            } else {
+                println!("⚠️  PID {} encontrado pero el proceso ya no existe. Limpiando PID file.", pid);
+                let _ = std::fs::remove_file(&pid_path);
+            }
+        }
+    }
+}
 
 pub fn start_monitor() {
     // Mostrar banner al inicio
@@ -378,7 +478,7 @@ pub fn start_monitor() {
 
                 match resultado_analisis {
                     Ok(true) => {
-                        if tests::ejecutar_tests(&test_path, &project_path).is_ok() {
+                        if test_runner::ejecutar_tests(&test_path, &project_path).is_ok() {
                             let _ = docs::actualizar_documentacion(
                                 &codigo,
                                 &changed_path,
@@ -403,7 +503,7 @@ pub fn start_monitor() {
                             print!("\n🔍 ¿Ayuda con test? (s/n): ");
                             io::stdout().flush().unwrap();
                             if leer_respuesta().as_deref() == Some("s") {
-                                let _ = tests::pedir_ayuda_test(
+                                let _ = test_runner::pedir_ayuda_test(
                                     &codigo,
                                     &test_path,
                                     &config,
@@ -420,3 +520,37 @@ pub fn start_monitor() {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_pid_file_write_and_read() {
+        let tmp = TempDir::new().unwrap();
+        let sentinel_dir = tmp.path().join(".sentinel");
+        std::fs::create_dir_all(&sentinel_dir).unwrap();
+        let pid_path = sentinel_dir.join("monitor.pid");
+
+        write_pid_file(&pid_path, 12345).unwrap();
+        let pid = read_pid_file(&pid_path).unwrap();
+        assert_eq!(pid, 12345);
+    }
+
+    #[test]
+    fn test_read_pid_file_returns_none_if_missing() {
+        let tmp = TempDir::new().unwrap();
+        let pid_path = tmp.path().join(".sentinel/monitor.pid");
+        assert!(read_pid_file(&pid_path).is_none());
+    }
+
+    #[test]
+    fn test_write_pid_file_creates_parent_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let pid_path = tmp.path().join(".sentinel/nested/monitor.pid");
+        // Parent does not exist yet
+        write_pid_file(&pid_path, 99).unwrap();
+        assert!(pid_path.exists());
+        assert_eq!(read_pid_file(&pid_path).unwrap(), 99);
+    }
+}

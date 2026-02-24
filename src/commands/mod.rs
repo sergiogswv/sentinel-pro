@@ -16,8 +16,18 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Inicia el modo monitor (comportamiento clásico)
-    Monitor,
+    /// Inicia el modo monitor (foreground) o gestiona el proceso daemon
+    Monitor {
+        /// Iniciar como daemon en segundo plano (guarda PID en .sentinel/monitor.pid)
+        #[arg(long)]
+        daemon: bool,
+        /// Detener el daemon en ejecución
+        #[arg(long)]
+        stop: bool,
+        /// Mostrar estado del daemon
+        #[arg(long)]
+        status: bool,
+    },
     /// Gestiona la lista de hallazgos ignorados (falsos positivos)
     Ignore {
         /// Regla a ignorar (ej: DEAD_CODE, UNUSED_IMPORT)

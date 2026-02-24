@@ -27,8 +27,22 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Monitor) => {
-            commands::monitor::start_monitor();
+        Some(Commands::Monitor { daemon, stop, status }) => {
+            let project_root = crate::config::SentinelConfig::find_project_root()
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+            if stop {
+                commands::monitor::handle_stop(&project_root);
+            } else if status {
+                commands::monitor::handle_status(&project_root);
+            } else if daemon {
+                if let Err(e) = commands::monitor::handle_daemon(&project_root) {
+                    eprintln!("❌ Error iniciando daemon: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                commands::monitor::start_monitor();
+            }
         }
         Some(Commands::Ignore { rule, file, symbol, list, clear }) => {
             commands::ignore::handle_ignore_command(rule, file, symbol, list, clear);
