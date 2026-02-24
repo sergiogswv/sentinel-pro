@@ -202,6 +202,8 @@ impl StaticAnalyzer for ComplexityAnalyzer {
                     complexity += 1;
                 }
 
+                // NOTE: 10 is the hardcoded generation floor. The configured complexity_threshold
+                // can suppress violations above this floor but cannot lower it below 10.
                 if complexity > 10 {
                     violations.push(RuleViolation {
                         rule_name: "HIGH_COMPLEXITY".to_string(),
@@ -228,6 +230,7 @@ impl StaticAnalyzer for ComplexityAnalyzer {
                 let start_line = node.range().start_point.row;
                 let end_line = node.range().end_point.row;
                 let line_count = end_line.saturating_sub(start_line);
+                // NOTE: 50 is the hardcoded generation floor for function length.
                 if line_count > 50 {
                     violations.push(RuleViolation {
                         rule_name: "FUNCTION_TOO_LONG".to_string(),

@@ -434,7 +434,8 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 });
             }
 
-            // Apply rule config thresholds
+            // Filter by rule config thresholds — mirrors filter semantics: only keep violations
+            // that exceed configured thresholds or belong to enabled rule categories.
             let rule_cfg = &agent_context.config.rule_config;
             violations.retain(|v| match v.rule_name.as_str() {
                 "HIGH_COMPLEXITY" => v.value.map(|n| n > rule_cfg.complexity_threshold).unwrap_or(true),

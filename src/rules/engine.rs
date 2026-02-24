@@ -101,25 +101,6 @@ impl RuleEngine {
         violations
     }
 
-    /// Post-filter violations based on RuleConfig thresholds and enabled flags.
-    pub fn filter_by_config(
-        mut violations: Vec<crate::rules::RuleViolation>,
-        config: &crate::config::RuleConfig,
-    ) -> Vec<crate::rules::RuleViolation> {
-        violations.retain(|v| match v.rule_name.as_str() {
-            "HIGH_COMPLEXITY" => {
-                v.value.map(|n| n > config.complexity_threshold).unwrap_or(true)
-            }
-            "FUNCTION_TOO_LONG" => {
-                v.value.map(|n| n > config.function_length_threshold).unwrap_or(true)
-            }
-            "DEAD_CODE" | "DEAD_CODE_GLOBAL" => config.dead_code_enabled,
-            "UNUSED_IMPORT" => config.unused_imports_enabled,
-            _ => true,
-        });
-        violations
-    }
-
     fn check_rule(&self, rule: &FrameworkRule, content: &str) -> bool {
         for forbidden in &rule.forbidden_patterns {
             if content.contains(forbidden) {
@@ -134,62 +115,5 @@ impl RuleEngine {
         }
 
         false
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::RuleConfig;
-    use crate::rules::{RuleViolation, RuleLevel};
-
-    #[test]
-    fn test_filter_by_config_complexity_threshold() {
-        let violations = vec![
-            RuleViolation {
-                rule_name: "HIGH_COMPLEXITY".to_string(),
-                message: "complexity 12".to_string(),
-                level: RuleLevel::Error,
-                line: None,
-                symbol: None,
-                value: Some(12),
-            },
-            RuleViolation {
-                rule_name: "HIGH_COMPLEXITY".to_string(),
-                message: "complexity 7".to_string(),
-                level: RuleLevel::Error,
-                line: None,
-                symbol: None,
-                value: Some(7),
-            },
-        ];
-        let config = RuleConfig { complexity_threshold: 15, ..RuleConfig::default() };
-        let filtered = RuleEngine::filter_by_config(violations, &config);
-        assert!(filtered.is_empty(), "both below threshold 15 should be filtered");
-    }
-
-    #[test]
-    fn test_filter_by_config_dead_code_disabled() {
-        let violations = vec![
-            RuleViolation {
-                rule_name: "DEAD_CODE".to_string(),
-                message: "unused".to_string(),
-                level: RuleLevel::Warning,
-                line: None,
-                symbol: None,
-                value: None,
-            },
-            RuleViolation {
-                rule_name: "UNUSED_IMPORT".to_string(),
-                message: "unused import".to_string(),
-                level: RuleLevel::Warning,
-                line: None,
-                symbol: None,
-                value: None,
-            },
-        ];
-        let config = RuleConfig { dead_code_enabled: false, unused_imports_enabled: false, ..RuleConfig::default() };
-        let filtered = RuleEngine::filter_by_config(violations, &config);
-        assert!(filtered.is_empty(), "both rules disabled, should filter all");
     }
 }
