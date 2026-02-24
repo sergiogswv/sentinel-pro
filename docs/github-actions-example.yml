@@ -1,0 +1,27 @@
+# .github/workflows/sentinel.yml
+# Example: run Sentinel in CI and upload results to GitHub Security tab
+name: Sentinel Code Quality
+
+on: [push, pull_request]
+
+jobs:
+  sentinel-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Sentinel
+        run: cargo build --release
+
+      - name: Run Sentinel check (SARIF output)
+        run: ./target/release/sentinel pro check src/ --format sarif > sentinel.sarif
+        continue-on-error: true  # don't fail the step, let the upload handle it
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: sentinel.sarif
+          category: sentinel

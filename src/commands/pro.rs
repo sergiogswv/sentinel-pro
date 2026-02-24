@@ -176,6 +176,75 @@ fn review_size_mode(file_count: usize) -> ReviewMode {
     else { ReviewMode::Large }
 }
 
+/// Input type for SARIF rendering.
+#[derive(Debug)]
+pub struct SarifIssue {
+    pub file: String,
+    pub rule: String,
+    pub severity: String,  // "error", "warning", "note"
+    pub message: String,
+    pub line: Option<usize>,
+}
+
+/// Renders a SARIF 2.1.0 JSON string from a list of issues.
+/// Returns a pretty-printed JSON string compatible with GitHub Security tab.
+pub fn render_sarif(issues: &[SarifIssue]) -> String {
+    // Collect unique rule IDs for the driver.rules array
+    let mut seen_rules: Vec<&str> = Vec::new();
+    for issue in issues {
+        if !seen_rules.contains(&issue.rule.as_str()) {
+            seen_rules.push(&issue.rule);
+        }
+    }
+
+    let rules_json: Vec<serde_json::Value> = seen_rules.iter().map(|r| {
+        serde_json::json!({
+            "id": r,
+            "shortDescription": { "text": r }
+        })
+    }).collect();
+
+    let results_json: Vec<serde_json::Value> = issues.iter().map(|i| {
+        let level = match i.severity.as_str() {
+            "error" => "error",
+            "note"  => "note",
+            _       => "warning",
+        };
+        let start_line = i.line.unwrap_or(1);
+        serde_json::json!({
+            "ruleId": i.rule,
+            "level": level,
+            "message": { "text": i.message },
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": {
+                        "uri": i.file,
+                        "uriBaseId": "%SRCROOT%"
+                    },
+                    "region": { "startLine": start_line }
+                }
+            }]
+        })
+    }).collect();
+
+    let sarif = serde_json::json!({
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "sentinel",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "rules": rules_json
+                }
+            },
+            "results": results_json
+        }]
+    });
+
+    serde_json::to_string_pretty(&sarif).unwrap_or_default()
+}
+
 pub fn handle_pro_command(subcommand: ProCommands) {
     // Buscar la raíz del proyecto inteligentemente
     let project_root = SentinelConfig::find_project_root()
@@ -231,9 +300,12 @@ pub fn handle_pro_command(subcommand: ProCommands) {
     // Ejecutar en Runtime de Tokio
     let rt = tokio::runtime::Runtime::new().unwrap();
 
-    // Detect JSON mode before dispatching (to suppress indexing messages in JSON output)
+    // Detect JSON/SARIF mode before dispatching (to suppress indexing messages in machine-readable output)
     let json_mode_global = match &subcommand {
-        ProCommands::Check { format, .. } => format.to_lowercase() == "json",
+        ProCommands::Check { format, .. } => {
+            let fmt = format.to_lowercase();
+            fmt == "json" || fmt == "sarif"
+        }
         ProCommands::Audit { format, .. } => format.to_lowercase() == "json",
         _ => false,
     };
@@ -290,11 +362,16 @@ pub fn handle_pro_command(subcommand: ProCommands) {
     match subcommand {
         ProCommands::Check { target, format } => {
             let path = agent_context.project_root.join(&target);
-            let json_mode = format.to_lowercase() == "json";
+            let fmt = format.to_lowercase();
+            let json_mode = fmt == "json";
+            let sarif_mode = fmt == "sarif";
 
             if !path.exists() {
                 if json_mode {
                     println!("{{\"error\":\"El destino '{}' no existe\"}}",  target);
+                } else if sarif_mode {
+                    let empty = render_sarif(&[]);
+                    println!("{}", empty);
                 } else {
                     println!("{} El destino '{}' no existe en el proyecto.", "❌".red(), target);
                 }
@@ -334,13 +411,15 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                         "{{\"checked\":0,\"errors\":0,\"warnings\":0,\"infos\":0,\"index_populated\":{},\"issues\":[]}}",
                         index_populated
                     );
+                } else if sarif_mode {
+                    println!("{}", render_sarif(&[]));
                 } else {
                     println!("{} No se encontraron archivos para revisar en '{}'.", "⚠️".yellow(), target);
                 }
                 return;
             }
 
-            if !json_mode {
+            if !json_mode && !sarif_mode {
                 // TS-first note: shown when no TS/JS files in target
                 let has_ts_js = files_to_check.iter().any(|f| {
                     matches!(
@@ -453,7 +532,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
             // Group by file for display
             let mut current_file = String::new();
             for v in &violations {
-                if !json_mode && v.file_path != current_file {
+                if !json_mode && !sarif_mode && v.file_path != current_file {
                     current_file = v.file_path.clone();
                     println!("\n📄 {}", current_file.bold().cyan());
                 }
@@ -464,7 +543,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     RuleLevel::Info    => { n_infos    += 1; ("info",    "ℹ️  INFO ") }
                 };
 
-                if json_mode {
+                if json_mode || sarif_mode {
                     json_issues.push(JsonIssue {
                         file: v.file_path.clone(),
                         rule: v.rule_name.clone(),
@@ -505,7 +584,16 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
             }
 
-            if json_mode {
+            if sarif_mode {
+                let sarif_issues: Vec<SarifIssue> = json_issues.iter().map(|j| SarifIssue {
+                    file: j.file.clone(),
+                    rule: j.rule.clone(),
+                    severity: j.severity.clone(),
+                    message: j.message.clone(),
+                    line: j.line,
+                }).collect();
+                println!("{}", render_sarif(&sarif_issues));
+            } else if json_mode {
                 #[derive(serde::Serialize)]
                 struct JsonOutput {
                     checked: usize,
@@ -2869,5 +2957,27 @@ mod batching_tests {
         assert_eq!(issues[0].file_path, "src/user.service.ts");
         assert_eq!(issues[1].file_path, "src/auth.service.ts");
         assert_eq!(issues[2].title, "Import no usado");
+    }
+
+    #[test]
+    fn test_render_sarif_produces_valid_structure() {
+        let issues = vec![
+            crate::commands::pro::SarifIssue {
+                file: "src/main.ts".to_string(),
+                rule: "DEAD_CODE".to_string(),
+                severity: "warning".to_string(),
+                message: "userId no se usa".to_string(),
+                line: Some(23),
+            },
+        ];
+        let sarif = crate::commands::pro::render_sarif(&issues);
+        assert!(sarif.contains("\"$schema\""), "must have schema");
+        assert!(sarif.contains("\"2.1.0\""), "must have version");
+        assert!(sarif.contains("DEAD_CODE"), "must include rule");
+        assert!(sarif.contains("23"), "must include line number");
+        // Verify valid JSON
+        let parsed: serde_json::Value = serde_json::from_str(&sarif).expect("must be valid JSON");
+        assert_eq!(parsed["version"], "2.1.0");
+        assert!(parsed["runs"][0]["results"][0]["ruleId"] == "DEAD_CODE");
     }
 }
