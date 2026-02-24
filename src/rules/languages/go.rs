@@ -57,6 +57,7 @@ impl StaticAnalyzer for GoDeadCodeAnalyzer {
                         level: RuleLevel::Warning,
                         line: find_line_of(source_code, name),
                         symbol: Some(name.to_string()),
+                        value: None,
                     });
                 }
             }
@@ -107,6 +108,7 @@ impl StaticAnalyzer for GoUnusedImportsAnalyzer {
                         level: RuleLevel::Warning,
                         line: find_line_of(source_code, raw),
                         symbol: Some(pkg_name.to_string()),
+                        value: None,
                     });
                 }
             }
@@ -178,6 +180,7 @@ impl StaticAnalyzer for GoComplexityAnalyzer {
                         level: RuleLevel::Error,
                         line: Some(func_node.start_position().row + 1),
                         symbol: None,
+                        value: Some(complexity),
                     });
                 }
 
@@ -195,6 +198,7 @@ impl StaticAnalyzer for GoComplexityAnalyzer {
                         level: RuleLevel::Warning,
                         line: Some(start_line + 1),
                         symbol: None,
+                        value: Some(line_count),
                     });
                 }
             }
@@ -239,6 +243,7 @@ impl StaticAnalyzer for GoUncheckedErrorAnalyzer {
                             level: RuleLevel::Warning,
                             line: Some(call.node.start_position().row + 1),
                             symbol: None,
+                            value: None,
                         });
                     }
                 }
@@ -291,6 +296,7 @@ impl StaticAnalyzer for GoNamingConventionAnalyzer {
                         level: RuleLevel::Info,
                         line: Some(capture.node.start_position().row + 1),
                         symbol: Some(name.to_string()),
+                        value: None,
                     });
                 }
             }
@@ -339,6 +345,7 @@ impl StaticAnalyzer for GoDeferInLoopAnalyzer {
                         level: RuleLevel::Warning,
                         line: Some(loop_node.start_position().row + 1),
                         symbol: None,
+                        value: None,
                     });
                 }
             }

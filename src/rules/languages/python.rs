@@ -54,6 +54,7 @@ impl StaticAnalyzer for PythonDeadCodeAnalyzer {
                         level: RuleLevel::Warning,
                         line: find_line_of(source_code, name),
                         symbol: Some(name.to_string()),
+                        value: None,
                     });
                 }
             }
@@ -105,6 +106,7 @@ impl StaticAnalyzer for PythonUnusedImportsAnalyzer {
                         level: RuleLevel::Warning,
                         line: find_line_of(source_code, name),
                         symbol: Some(name.to_string()),
+                        value: None,
                     });
                 }
             }
@@ -125,6 +127,7 @@ impl StaticAnalyzer for PythonUnusedImportsAnalyzer {
                             level: RuleLevel::Warning,
                             line: find_line_of(source_code, name),
                             symbol: Some(name.to_string()),
+                            value: None,
                         });
                     }
                 }
@@ -192,6 +195,7 @@ impl StaticAnalyzer for PythonComplexityAnalyzer {
                         level: RuleLevel::Error,
                         line: Some(func_node.start_position().row + 1),
                         symbol: None,
+                        value: Some(complexity),
                     });
                 }
                 let line_count = func_node.range().end_point.row.saturating_sub(func_node.range().start_point.row);
@@ -202,6 +206,7 @@ impl StaticAnalyzer for PythonComplexityAnalyzer {
                         level: RuleLevel::Warning,
                         line: Some(func_node.start_position().row + 1),
                         symbol: None,
+                        value: Some(line_count),
                     });
                 }
             }

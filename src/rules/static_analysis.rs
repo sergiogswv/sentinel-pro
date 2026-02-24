@@ -69,6 +69,7 @@ impl StaticAnalyzer for DeadCodeAnalyzer {
                         level: RuleLevel::Warning,
                         line: find_line_of(source_code, name),
                         symbol: Some(name.to_string()),
+                        value: None,
                     });
                 }
             }
@@ -125,6 +126,7 @@ impl StaticAnalyzer for UnusedImportsAnalyzer {
                         level: RuleLevel::Warning,
                         line: find_line_of(source_code, name),
                         symbol: Some(name.to_string()),
+                        value: None,
                     });
                 }
             }
@@ -207,6 +209,7 @@ impl StaticAnalyzer for ComplexityAnalyzer {
                         level: RuleLevel::Error,
                         line: Some(func_node.start_position().row + 1),
                         symbol: None,
+                        value: Some(complexity),
                     });
                 }
             }
@@ -235,6 +238,7 @@ impl StaticAnalyzer for ComplexityAnalyzer {
                         level: RuleLevel::Warning,
                         line: Some(start_line + 1),
                         symbol: None,
+                        value: Some(line_count),
                     });
                 }
             }
@@ -306,6 +310,7 @@ impl NamingAnalyzerWithFramework {
                             level: RuleLevel::Info,
                             line: node_line,
                             symbol: None,
+                            value: None,
                         });
                     }
                 } else {
@@ -320,6 +325,7 @@ impl NamingAnalyzerWithFramework {
                             level: RuleLevel::Info,
                             line: node_line,
                             symbol: None,
+                            value: None,
                         });
                     }
                 }

@@ -386,6 +386,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 message: String,
                 level: crate::rules::RuleLevel,
                 line: Option<usize>,
+                value: Option<usize>,
             }
 
             let mut violations: Vec<FileViolation> = Vec::new();
@@ -407,6 +408,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                         message: v.message,
                         level: v.level,
                         line: v.line,
+                        value: v.value,
                     });
                 }
             }
@@ -431,6 +433,16 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     })
                 });
             }
+
+            // Apply rule config thresholds
+            let rule_cfg = &agent_context.config.rule_config;
+            violations.retain(|v| match v.rule_name.as_str() {
+                "HIGH_COMPLEXITY" => v.value.map(|n| n > rule_cfg.complexity_threshold).unwrap_or(true),
+                "FUNCTION_TOO_LONG" => v.value.map(|n| n > rule_cfg.function_length_threshold).unwrap_or(true),
+                "DEAD_CODE" | "DEAD_CODE_GLOBAL" => rule_cfg.dead_code_enabled,
+                "UNUSED_IMPORT" => rule_cfg.unused_imports_enabled,
+                _ => true,
+            });
 
             let mut json_issues: Vec<JsonIssue> = Vec::new();
             let mut n_errors = 0usize;

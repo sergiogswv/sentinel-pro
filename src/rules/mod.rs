@@ -45,4 +45,6 @@ pub struct RuleViolation {
     pub level: RuleLevel,
     pub line: Option<usize>,
     pub symbol: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<usize>,   // raw numeric value for threshold filtering
 }

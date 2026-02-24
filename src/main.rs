@@ -39,6 +39,11 @@ fn main() {
         Some(Commands::Pro { subcommand }) => {
             commands::pro::handle_pro_command(subcommand);
         }
+        Some(Commands::Rules) => {
+            let project_root = crate::config::SentinelConfig::find_project_root()
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+            commands::rules::handle_rules_command(&project_root);
+        }
         None => {
             // Comportamiento por defecto (legacy)
             commands::monitor::start_monitor();

@@ -59,6 +59,32 @@ fn default_true() -> bool {
     true
 }
 
+fn default_complexity() -> usize { 10 }
+fn default_function_length() -> usize { 50 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RuleConfig {
+    #[serde(default = "default_complexity")]
+    pub complexity_threshold: usize,
+    #[serde(default = "default_function_length")]
+    pub function_length_threshold: usize,
+    #[serde(default = "default_true")]
+    pub dead_code_enabled: bool,
+    #[serde(default = "default_true")]
+    pub unused_imports_enabled: bool,
+}
+
+impl Default for RuleConfig {
+    fn default() -> Self {
+        Self {
+            complexity_threshold: 10,
+            function_length_threshold: 50,
+            dead_code_enabled: true,
+            unused_imports_enabled: true,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LocalLlmConfig {
     pub provider: String,
@@ -113,6 +139,8 @@ pub struct SentinelConfig {
     pub local_llm: Option<LocalLlmConfig>,
     #[serde(default)]
     pub ml: Option<MlConfig>,
+    #[serde(default)]
+    pub rule_config: RuleConfig,
 }
 
 impl SentinelConfig {
@@ -174,6 +202,7 @@ impl SentinelConfig {
                 embeddings_model: "codebert".to_string(),
                 bug_predictor_model: "bug-predictor-v1".to_string(),
             }),
+            rule_config: RuleConfig::default(),
         }
     }
 

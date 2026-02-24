@@ -2,6 +2,7 @@ pub mod ignore;
 pub mod index;
 pub mod monitor;
 pub mod pro;
+pub mod rules;
 
 use clap::{Parser, Subcommand};
 
@@ -42,6 +43,8 @@ pub enum Commands {
         #[arg(long)]
         check: bool,
     },
+    /// Lista las reglas activas con umbrales configurables
+    Rules,
     /// Comandos avanzados de la versión Pro
     Pro {
         #[command(subcommand)]
