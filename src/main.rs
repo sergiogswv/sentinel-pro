@@ -55,8 +55,8 @@ fn main() {
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
             commands::init::handle_init_command(&project_root, force);
         }
-        Some(Commands::Ignore { rule, file, symbol, list, clear }) => {
-            commands::ignore::handle_ignore_command(rule, file, symbol, list, clear);
+        Some(Commands::Ignore { rule, file, symbol, list, clear, show_file }) => {
+            commands::ignore::handle_ignore_command(rule, file, symbol, list, clear, show_file);
         }
         Some(Commands::Index { rebuild, check }) => {
             commands::index::handle_index_command(rebuild, check);

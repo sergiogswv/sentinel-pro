@@ -73,6 +73,9 @@ pub enum Commands {
         /// Eliminar todos los ignores para un archivo
         #[arg(long)]
         clear: Option<String>,
+        /// Show the path of the root ignores file
+        #[arg(long)]
+        show_file: bool,
     },
     /// Gestión del índice de símbolos y call graph
     Index {
