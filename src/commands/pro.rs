@@ -1,4 +1,4 @@
-use crate::agents::base::{AgentContext, Task, TaskType};
+use crate::agents::base::{Agent, AgentContext, Task, TaskType};
 use crate::agents::fix_suggester::FixSuggesterAgent;
 use crate::agents::orchestrator::AgentOrchestrator;
 use crate::agents::splitter::SplitterAgent;
@@ -6,6 +6,8 @@ use crate::agents::reviewer::ReviewerAgent;
 use crate::agents::tester::TesterAgent;
 use crate::commands::ProCommands;
 use crate::config::SentinelConfig;
+use crate::commands::ignore::load_ignore_entries;
+use crate::commands::index::count_project_files;
 use crate::index::IndexDb;
 use crate::index::ProjectIndexBuilder;
 use crate::rules::RuleLevel;
@@ -179,6 +181,34 @@ pub fn handle_pro_command(subcommand: ProCommands) {
         }
     }
 
+    // Stale-index warning: warn once if disk file count diverges significantly from index
+    if !json_mode_global {
+        if let Some(ref db) = agent_context.index_db {
+            if db.is_populated() {
+                let disk_count = count_project_files(
+                    &agent_context.project_root,
+                    &agent_context.config.file_extensions,
+                );
+                let index_count = db.indexed_file_count();
+                let diff = (disk_count as isize - index_count as isize).unsigned_abs();
+                let stale_threshold = 5.max(disk_count / 10);
+                if diff > stale_threshold {
+                    println!(
+                        "\n{} {} ({} indexados, {} en disco).",
+                        "⚠️".yellow(),
+                        "Índice posiblemente desactualizado".yellow(),
+                        index_count,
+                        disk_count
+                    );
+                    println!(
+                        "   Corre {} para actualizar.\n",
+                        "`sentinel index --rebuild`".cyan()
+                    );
+                }
+            }
+        }
+    }
+
     match subcommand {
         ProCommands::Check { target, format } => {
             let path = agent_context.project_root.join(&target);
@@ -271,50 +301,87 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 line: Option<usize>,
             }
 
+            struct FileViolation {
+                file_path: String,
+                rule_name: String,
+                symbol: Option<String>,
+                message: String,
+                level: crate::rules::RuleLevel,
+                line: Option<usize>,
+            }
+
+            let mut violations: Vec<FileViolation> = Vec::new();
+
+            for file_path in &files_to_check {
+                let content = std::fs::read_to_string(file_path).unwrap_or_default();
+                let file_violations = rule_engine.validate_file(file_path, &content);
+
+                let rel = file_path
+                    .strip_prefix(&agent_context.project_root)
+                    .unwrap_or(file_path);
+                let rel_str = rel.display().to_string();
+
+                for v in file_violations {
+                    violations.push(FileViolation {
+                        file_path: rel_str.clone(),
+                        rule_name: v.rule_name,
+                        symbol: v.symbol,
+                        message: v.message,
+                        level: v.level,
+                        line: v.line,
+                    });
+                }
+            }
+
+            // Apply ignore list: remove suppressed findings
+            let ignore_entries = load_ignore_entries(&agent_context.project_root);
+            if !ignore_entries.is_empty() {
+                violations.retain(|v| {
+                    !ignore_entries.iter().any(|e| {
+                        e.rule == v.rule_name
+                            && (v.file_path.contains(&e.file) || e.file.contains(&v.file_path))
+                            && e.symbol
+                                .as_ref()
+                                .map(|s| v.symbol.as_deref() == Some(s.as_str()))
+                                .unwrap_or(true)
+                    })
+                });
+            }
+
             let mut json_issues: Vec<JsonIssue> = Vec::new();
             let mut n_errors = 0usize;
             let mut n_warnings = 0usize;
             let mut n_infos = 0usize;
 
-            for file_path in &files_to_check {
-                let content = std::fs::read_to_string(file_path).unwrap_or_default();
-                let violations = rule_engine.validate_file(file_path, &content);
-
-                if violations.is_empty() {
-                    continue;
+            // Group by file for display
+            let mut current_file = String::new();
+            for v in &violations {
+                if !json_mode && v.file_path != current_file {
+                    current_file = v.file_path.clone();
+                    println!("\n📄 {}", current_file.bold().cyan());
                 }
 
-                let rel = file_path
-                    .strip_prefix(&agent_context.project_root)
-                    .unwrap_or(file_path);
+                let (sev_str, icon) = match v.level {
+                    RuleLevel::Error   => { n_errors   += 1; ("error",   "❌ ERROR") }
+                    RuleLevel::Warning => { n_warnings += 1; ("warning", "⚠️  WARN ") }
+                    RuleLevel::Info    => { n_infos    += 1; ("info",    "ℹ️  INFO ") }
+                };
 
-                if !json_mode {
-                    println!("\n📄 {}", rel.display().to_string().bold().cyan());
-                }
-
-                for v in &violations {
-                    let (sev_str, icon) = match v.level {
-                        RuleLevel::Error   => { n_errors   += 1; ("error",   "❌ ERROR") }
-                        RuleLevel::Warning => { n_warnings += 1; ("warning", "⚠️  WARN ") }
-                        RuleLevel::Info    => { n_infos    += 1; ("info",    "ℹ️  INFO ") }
-                    };
-
-                    if json_mode {
-                        json_issues.push(JsonIssue {
-                            file: rel.display().to_string(),
-                            rule: v.rule_name.clone(),
-                            severity: sev_str.to_string(),
-                            message: v.message.clone(),
-                            line: v.line,
-                        });
-                    } else {
-                        let line_info = v.line.map(|l| format!(":{}", l)).unwrap_or_default();
-                        println!("   {} [{}{}]: {}", icon.color(match v.level {
-                            RuleLevel::Error   => "red",
-                            RuleLevel::Warning => "yellow",
-                            RuleLevel::Info    => "blue",
-                        }), v.rule_name.yellow(), line_info, v.message);
-                    }
+                if json_mode {
+                    json_issues.push(JsonIssue {
+                        file: v.file_path.clone(),
+                        rule: v.rule_name.clone(),
+                        severity: sev_str.to_string(),
+                        message: v.message.clone(),
+                        line: v.line,
+                    });
+                } else {
+                    let line_info = v.line.map(|l| format!(":{}", l)).unwrap_or_default();
+                    println!("   {} [{}{}]: {}", icon.color(match v.level {
+                        RuleLevel::Error   => "red",
+                        RuleLevel::Warning => "yellow",
+                        RuleLevel::Info    => "blue",
+                    }), v.rule_name.yellow(), line_info, v.message);
                 }
             }
 
@@ -349,6 +416,15 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                     n_errors.to_string().red().bold(),
                     n_warnings.to_string().yellow(),
                     n_infos.to_string().blue());
+            }
+
+            if !violations.is_empty() && !json_mode {
+                println!(
+                    "\n💡 Para ignorar: {} {} {}",
+                    "sentinel ignore".cyan(),
+                    "<REGLA>".dimmed(),
+                    "<ARCHIVO>".dimmed()
+                );
             }
 
             // Exit 1 si hay errores → CI falla el build
@@ -1600,10 +1676,13 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                               4. Deuda técnica y riesgos de seguridad con evidencia concreta.".to_string(),
                 task_type: TaskType::Analyze,
                 file_path: None,
-                context: Some(format!(
-                    "ESTADÍSTICAS:\nArchivos escaneados: {}\n\nESTRUCTURA DE DIRECTORIOS:\n{}\n\nSTACK TECNOLÓGICO (Dependencias):\n{}\n\nMUESTRA DE CÓDIGO FUENTE (para análisis concreto):\n{}",
-                    file_count, project_tree, deps_list, codigo_muestra
-                )),
+                context: Some({
+                    let arch_ctx = agent_context.build_architectural_context();
+                    format!(
+                        "ESTADÍSTICAS:\nArchivos escaneados: {}\n\nESTRUCTURA DE DIRECTORIOS:\n{}\n\nSTACK TECNOLÓGICO (Dependencias):\n{}{}\n\nMUESTRA DE CÓDIGO FUENTE (para análisis concreto):\n{}",
+                        file_count, project_tree, deps_list, arch_ctx, codigo_muestra
+                    )
+                }),
             };
 
             let result =
@@ -1819,7 +1898,7 @@ pub fn handle_pro_command(subcommand: ProCommands) {
                 }
             }
         }
-        ProCommands::Audit { target, no_fix, format, max_files } => {
+        ProCommands::Audit { target, no_fix, format, max_files, concurrency } => {
             let json_mode = format.to_lowercase() == "json";
             let non_interactive = no_fix || json_mode;
 
@@ -1897,112 +1976,178 @@ pub fn handle_pro_command(subcommand: ProCommands) {
 
             let total_batches = final_batches.len();
 
+            let concurrency = concurrency.clamp(1, 10);
+            let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
+
+            // Pre-build all batch data before entering the async context
+            struct BatchData {
+                batch_idx: usize,
+                batch_context: String,
+                batch_rel_paths: Vec<String>,
+                batch_files: Vec<std::path::PathBuf>,
+                module_name: String,
+            }
+
+            let mut batch_data_list: Vec<BatchData> = Vec::new();
             for (batch_idx, batch_files) in final_batches.iter().enumerate() {
-                // Construir contexto multi-archivo para el batch
                 let mut batch_context = String::new();
                 let mut batch_rel_paths: Vec<String> = Vec::new();
-
                 for file_path in batch_files {
                     let rel_path = file_path
                         .strip_prefix(&agent_context.project_root)
                         .unwrap_or(file_path);
                     let content = std::fs::read_to_string(file_path).unwrap_or_default();
-                    batch_context.push_str(&format!("\n\n=== {} ===\n{}", rel_path.display(), content));
+                    batch_context.push_str(&format!(
+                        "\n\n=== {} ===\n{}",
+                        rel_path.display(),
+                        content
+                    ));
                     batch_rel_paths.push(rel_path.display().to_string());
                 }
-
-                let module_name = batch_files.first()
+                let module_name = batch_files
+                    .first()
                     .and_then(|f| f.parent())
                     .and_then(|p| p.file_name())
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "módulo".to_string());
+                batch_data_list.push(BatchData {
+                    batch_idx,
+                    batch_context,
+                    batch_rel_paths,
+                    batch_files: batch_files.clone(),
+                    module_name,
+                });
+            }
 
-                let pb = if !json_mode {
-                    ui::crear_progreso(&format!(
-                        "[{}/{}] Auditando módulo '{}' ({} archivo(s))...",
-                        batch_idx + 1,
-                        total_batches,
-                        module_name,
-                        batch_files.len()
-                    ))
-                } else {
-                    indicatif::ProgressBar::hidden()
-                };
+            if !json_mode {
+                println!(
+                    "   Procesando {} batches ({} en paralelo)...",
+                    batch_data_list.len(),
+                    concurrency
+                );
+            }
 
-                let task = Task {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    description: format!(
-                        "Realiza una auditoría técnica de MÚLTIPLES archivos del módulo '{}'.\n\
-                        ARCHIVOS INCLUIDOS: {}\n\
-                        OBJETIVO: Identificar problemas de calidad, seguridad o bugs CORREGIBLES.\n\
-                        REGLAS:\n\
-                        1. Analiza TODOS los archivos y genera un array JSON con los problemas.\n\
-                        2. Cada objeto DEBE tener: title, description, severity (High/Medium/Low), suggested_fix, file_path (nombre del archivo al que pertenece el issue).\n\
-                        3. Responde ÚNICAMENTE con el bloque ```json — sin texto introductorio.\n\
-                        FORMATO JSON REQUERIDO:\n\
-                        ```json\n\
-                        [\n\
-                          {{\"title\": \"...\", \"description\": \"...\", \"severity\": \"High|Medium|Low\", \"suggested_fix\": \"...\", \"file_path\": \"nombre-del-archivo.ts\"}}\n\
-                        ]\n\
-                        ```",
-                        module_name,
-                        batch_rel_paths.join(", ")
-                    ),
-                    task_type: TaskType::Analyze,
-                    file_path: batch_files.first().cloned(),
-                    context: Some(batch_context),
-                };
+            // Parallel execution with JoinSet
+            let batch_results: Vec<Result<(usize, String, Vec<std::path::PathBuf>), String>> =
+                rt.block_on(async {
+                    let mut set = tokio::task::JoinSet::new();
 
-                match rt.block_on(orchestrator.execute_task("ReviewerAgent", &task, &agent_context)) {
-                    Ok(res) => {
-                        let json_str = crate::ai::utils::extraer_json(&res.output);
+                    for bd in batch_data_list {
+                        let permit = semaphore.clone().acquire_owned().await.unwrap();
+                        let config = std::sync::Arc::clone(&agent_context.config);
+                        let stats = std::sync::Arc::clone(&agent_context.stats);
+                        let project_root = agent_context.project_root.clone();
+                        let index_db = agent_context.index_db.clone();
+
+                        set.spawn(async move {
+                            let _permit = permit;
+                            let ctx = AgentContext {
+                                config,
+                                stats,
+                                project_root,
+                                index_db,
+                            };
+                            let reviewer = ReviewerAgent::new();
+                            let task = Task {
+                                id: uuid::Uuid::new_v4().to_string(),
+                                description: format!(
+                                    "Realiza una auditoría técnica de MÚLTIPLES archivos del módulo '{}'.\n\
+                                    ARCHIVOS INCLUIDOS: {}\n\
+                                    OBJETIVO: Identificar problemas de calidad, seguridad o bugs CORREGIBLES.\n\
+                                    REGLAS:\n\
+                                    1. Analiza TODOS los archivos y genera un array JSON con los problemas.\n\
+                                    2. Cada objeto DEBE tener: title, description, severity (High/Medium/Low), suggested_fix, file_path (nombre del archivo al que pertenece el issue).\n\
+                                    3. Responde ÚNICAMENTE con el bloque ```json — sin texto introductorio.\n\
+                                    FORMATO JSON REQUERIDO:\n\
+                                    ```json\n\
+                                    [\n\
+                                      {{\"title\": \"...\", \"description\": \"...\", \"severity\": \"High|Medium|Low\", \"suggested_fix\": \"...\", \"file_path\": \"nombre-del-archivo.ts\"}}\n\
+                                    ]\n\
+                                    ```",
+                                    bd.module_name,
+                                    bd.batch_rel_paths.join(", ")
+                                ),
+                                task_type: TaskType::Analyze,
+                                file_path: bd.batch_files.first().cloned(),
+                                context: Some(bd.batch_context),
+                            };
+
+                            // Up to 3 attempts with 2s delay on failure
+                            let mut last_err = String::new();
+                            for attempt in 0..3usize {
+                                match reviewer.execute(&task, &ctx).await {
+                                    Ok(res) => {
+                                        return Ok((bd.batch_idx, res.output, bd.batch_files));
+                                    }
+                                    Err(e) => {
+                                        last_err = e.to_string();
+                                        if attempt < 2 {
+                                            tokio::time::sleep(
+                                                tokio::time::Duration::from_secs(2),
+                                            )
+                                            .await;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(last_err)
+                        });
+                    }
+
+                    let mut results = Vec::new();
+                    while let Some(join_result) = set.join_next().await {
+                        results.push(join_result.unwrap_or_else(|e| Err(e.to_string())));
+                    }
+                    results
+                });
+
+            // Process results — same normalization logic as before
+            let pb_final = if !json_mode {
+                ui::crear_progreso("Procesando resultados...")
+            } else {
+                indicatif::ProgressBar::hidden()
+            };
+
+            for result in batch_results {
+                match result {
+                    Ok((_batch_idx, output, batch_files)) => {
+                        let json_str = crate::ai::utils::extraer_json(&output);
                         match serde_json::from_str::<Vec<AuditIssue>>(&json_str) {
                             Ok(mut issues) => {
                                 for issue in &mut issues {
-                                    // Normalizar file_path: buscar el archivo del batch que coincida
-                                    let matched_path = batch_files.iter()
+                                    let matched_path = batch_files
+                                        .iter()
                                         .find(|f| {
                                             f.to_string_lossy().contains(&issue.file_path)
-                                            || issue.file_path.contains(
-                                                &f.file_name()
-                                                    .map(|n| n.to_string_lossy().to_string())
-                                                    .unwrap_or_default()
-                                            )
+                                                || issue.file_path.contains(
+                                                    &f.file_name()
+                                                        .map(|n| n.to_string_lossy().to_string())
+                                                        .unwrap_or_default(),
+                                                )
                                         })
                                         .map(|f| f.to_string_lossy().to_string())
                                         .unwrap_or_else(|| {
-                                            batch_files.first()
+                                            batch_files
+                                                .first()
                                                 .map(|f| f.to_string_lossy().to_string())
                                                 .unwrap_or_default()
                                         });
                                     issue.file_path = matched_path;
-                                    all_issues.push(issue.clone());
                                 }
+                                all_issues.extend(issues);
                             }
                             Err(_) => {
                                 parse_failures += 1;
-                                pb.finish_and_clear();
-                                if !json_mode {
-                                    println!(
-                                        "   ⚠️  Módulo '{}': el AI no devolvió JSON válido — saltado.",
-                                        module_name.yellow()
-                                    );
-                                }
-                                continue;
                             }
                         }
                     }
-                    Err(e) => {
+                    Err(_) => {
                         parse_failures += 1;
-                        pb.finish_and_clear();
-                        if !json_mode {
-                            println!("   ❌ Error auditando módulo '{}': {}", module_name, e);
-                        }
-                        continue;
                     }
                 }
-                pb.finish_and_clear();
             }
+
+            pb_final.finish_and_clear();
 
             // Deduplicar: misma combinación (título normalizado, archivo) → conservar solo primero
             {
@@ -2294,6 +2439,59 @@ mod batching_tests {
             .find(|b| b.iter().any(|f| f.file_name().unwrap().to_str().unwrap().starts_with("user.")))
             .expect("user batch not found");
         assert_eq!(user_batch.len(), 2, "user batch must have both user.* files");
+    }
+
+    #[test]
+    fn test_ignore_filter_removes_matching_entry() {
+        use crate::commands::ignore::IgnoreEntry;
+
+        // Simulate the filter logic used in the check handler
+        struct FakeViolation {
+            rule_name: String,
+            file_path: String,
+            symbol: Option<String>,
+        }
+
+        let mut violations = vec![
+            FakeViolation {
+                rule_name: "DEAD_CODE".into(),
+                file_path: "src/user.ts".into(),
+                symbol: Some("userId".into()),
+            },
+            FakeViolation {
+                rule_name: "DEAD_CODE".into(),
+                file_path: "src/user.ts".into(),
+                symbol: Some("getUser".into()),
+            },
+            FakeViolation {
+                rule_name: "UNUSED_IMPORT".into(),
+                file_path: "src/auth.ts".into(),
+                symbol: None,
+            },
+        ];
+
+        let entries = vec![IgnoreEntry {
+            rule: "DEAD_CODE".into(),
+            file: "src/user.ts".into(),
+            symbol: Some("userId".into()),
+            added: "2026-02-23".into(),
+        }];
+
+        violations.retain(|v| {
+            !entries.iter().any(|e| {
+                e.rule == v.rule_name
+                    && (v.file_path.contains(&e.file) || e.file.contains(&v.file_path))
+                    && e.symbol
+                        .as_ref()
+                        .map(|s| v.symbol.as_deref() == Some(s.as_str()))
+                        .unwrap_or(true)
+            })
+        });
+
+        // userId filtered out; getUser and UNUSED_IMPORT kept
+        assert_eq!(violations.len(), 2);
+        assert_eq!(violations[0].symbol.as_deref(), Some("getUser"));
+        assert_eq!(violations[1].rule_name, "UNUSED_IMPORT");
     }
 
     #[test]

@@ -135,6 +135,7 @@ pub fn start_monitor() {
                                 no_fix: false,
                                 format: "text".to_string(),
                                 max_files: 20,
+                                concurrency: 3,
                             },
                         );
                         println!("✅ Auditoría terminada. Volviendo a monitorear...\n");

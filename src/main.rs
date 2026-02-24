@@ -30,6 +30,12 @@ fn main() {
         Some(Commands::Monitor) => {
             commands::monitor::start_monitor();
         }
+        Some(Commands::Ignore { rule, file, symbol, list, clear }) => {
+            commands::ignore::handle_ignore_command(rule, file, symbol, list, clear);
+        }
+        Some(Commands::Index { rebuild, check }) => {
+            commands::index::handle_index_command(rebuild, check);
+        }
         Some(Commands::Pro { subcommand }) => {
             commands::pro::handle_pro_command(subcommand);
         }

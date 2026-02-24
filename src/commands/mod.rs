@@ -1,3 +1,5 @@
+pub mod ignore;
+pub mod index;
 pub mod monitor;
 pub mod pro;
 
@@ -15,6 +17,31 @@ pub struct Cli {
 pub enum Commands {
     /// Inicia el modo monitor (comportamiento clásico)
     Monitor,
+    /// Gestiona la lista de hallazgos ignorados (falsos positivos)
+    Ignore {
+        /// Regla a ignorar (ej: DEAD_CODE, UNUSED_IMPORT)
+        rule: Option<String>,
+        /// Archivo donde aplicar el ignore (relativo al proyecto)
+        file: Option<String>,
+        /// Símbolo específico a ignorar (opcional)
+        #[arg(long)]
+        symbol: Option<String>,
+        /// Listar todos los ignores activos
+        #[arg(long)]
+        list: bool,
+        /// Eliminar todos los ignores para un archivo
+        #[arg(long)]
+        clear: Option<String>,
+    },
+    /// Gestión del índice de símbolos y call graph
+    Index {
+        /// Reconstruir el índice desde cero
+        #[arg(long)]
+        rebuild: bool,
+        /// Mostrar estado del índice sin modificar nada
+        #[arg(long)]
+        check: bool,
+    },
     /// Comandos avanzados de la versión Pro
     Pro {
         #[command(subcommand)]
@@ -77,6 +104,9 @@ pub enum ProCommands {
         /// Máximo de archivos a auditar (default: 20). Usa un número mayor para proyectos grandes.
         #[arg(long, default_value = "20")]
         max_files: usize,
+        /// Llamadas LLM en paralelo (default: 3, rango 1-10)
+        #[arg(long, default_value = "3")]
+        concurrency: usize,
     },
     /// Gestión de modelos de ML Local
     Ml {

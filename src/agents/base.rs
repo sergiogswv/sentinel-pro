@@ -71,6 +71,51 @@ impl AgentContext {
         }
         ctx
     }
+
+    /// Builds a project-wide architectural context block from the SQLite index.
+    /// Used by the Review handler to give the LLM structural insight beyond code samples.
+    /// Returns empty string if the index is empty or unavailable.
+    pub fn build_architectural_context(&self) -> String {
+        let Some(ref db) = self.index_db else {
+            return String::new();
+        };
+
+        let symbols = db.get_symbols(200);
+        let calls = db.get_call_graph(100);
+        let imports = db.get_import_usage(100);
+
+        if symbols.is_empty() && calls.is_empty() && imports.is_empty() {
+            return String::new();
+        }
+
+        let mut ctx = String::from("\n=== CONTEXTO ARQUITECTURAL (del índice) ===\n");
+
+        if !symbols.is_empty() {
+            ctx.push_str(&format!("Símbolos exportados ({}):\n", symbols.len()));
+            for (name, kind, file, line) in &symbols {
+                ctx.push_str(&format!("  {} [{}] → {}:{}\n", name, kind, file, line + 1));
+            }
+        }
+
+        if !calls.is_empty() {
+            ctx.push_str(&format!("\nRelaciones de llamada ({}):\n", calls.len()));
+            for (caller_file, caller_sym, callee_sym) in &calls {
+                ctx.push_str(&format!(
+                    "  {} → {} (via {})\n",
+                    caller_file, callee_sym, caller_sym
+                ));
+            }
+        }
+
+        if !imports.is_empty() {
+            ctx.push_str(&format!("\nImports activos ({}):\n", imports.len()));
+            for (file, import_name, import_src) in &imports {
+                ctx.push_str(&format!("  {} ← {} (from {})\n", file, import_name, import_src));
+            }
+        }
+
+        ctx
+    }
 }
 
 #[async_trait]
