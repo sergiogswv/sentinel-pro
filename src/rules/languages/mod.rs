@@ -1,5 +1,6 @@
 pub mod typescript;
 pub mod go;
+pub mod python;
 
 use tree_sitter::Language;
 use crate::rules::static_analysis::StaticAnalyzer;
@@ -21,6 +22,10 @@ pub fn get_language_and_analyzers(
         "go" => Some((
             tree_sitter_go::LANGUAGE.into(),
             go::analyzers(),
+        )),
+        "py" => Some((
+            tree_sitter_python::LANGUAGE.into(),
+            python::analyzers(),
         )),
         _ => None,
     }
