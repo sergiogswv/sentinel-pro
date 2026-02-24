@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Instant;
 
-pub fn write_pid_file(pid_path: &Path, pid: u32) -> anyhow::Result<()> {
+pub(crate) fn write_pid_file(pid_path: &Path, pid: u32) -> anyhow::Result<()> {
     if let Some(parent) = pid_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -20,13 +20,13 @@ pub fn write_pid_file(pid_path: &Path, pid: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn read_pid_file(pid_path: &Path) -> Option<u32> {
+pub(crate) fn read_pid_file(pid_path: &Path) -> Option<u32> {
     std::fs::read_to_string(pid_path)
         .ok()
         .and_then(|s| s.trim().parse::<u32>().ok())
 }
 
-pub fn is_process_alive(pid: u32) -> bool {
+pub(crate) fn is_process_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
         use nix::sys::signal;
@@ -49,24 +49,43 @@ pub fn handle_daemon(project_root: &Path) -> anyhow::Result<()> {
                 return Ok(());
             }
         }
+        // Stale PID file (process dead): write_pid_file below will overwrite it.
     }
 
     let exe = std::env::current_exe()?;
-    let child = std::process::Command::new(exe)
+    let mut command = std::process::Command::new(exe);
+    command
         .arg("monitor")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
+        .stderr(std::process::Stdio::null());
 
+    // Detach from the controlling terminal on Unix: create a new session so
+    // the daemon does not receive SIGHUP when the parent terminal closes.
+    // SAFETY: setsid(2) is async-signal-safe and has no preconditions.
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        command.pre_exec(|| {
+            nix::unistd::setsid()
+                .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+            Ok(())
+        });
+    }
+
+    let child = command.spawn()?;
     let pid = child.id();
+    // Forget the Child handle so it is not waited on drop — the daemon
+    // runs independently after this process exits.
+    std::mem::forget(child);
+
     write_pid_file(&pid_path, pid)?;
     println!("✅ sentinel monitor iniciado en background (PID {})", pid);
     println!("   Detener: sentinel monitor --stop");
     Ok(())
 }
 
-pub fn handle_stop(project_root: &Path) {
+pub fn handle_stop(project_root: &Path) -> anyhow::Result<()> {
     let pid_path = project_root.join(".sentinel/monitor.pid");
     match read_pid_file(&pid_path) {
         None => {
@@ -79,11 +98,13 @@ pub fn handle_stop(project_root: &Path) {
                 use nix::unistd::Pid;
                 match signal::kill(Pid::from_raw(pid as i32), Signal::SIGTERM) {
                     Ok(_) => {
-                        let _ = std::fs::remove_file(&pid_path);
+                        if let Err(e) = std::fs::remove_file(&pid_path) {
+                            eprintln!("⚠️  No se pudo eliminar PID file: {}", e);
+                        }
                         println!("✅ sentinel monitor detenido (PID {})", pid);
                     }
                     Err(e) => {
-                        println!("⚠️  No se pudo enviar SIGTERM a PID {}: {}. Limpiando PID file.", pid, e);
+                        eprintln!("⚠️  No se pudo enviar SIGTERM a PID {}: {}. Limpiando PID file.", pid, e);
                         let _ = std::fs::remove_file(&pid_path);
                     }
                 }
@@ -94,9 +115,10 @@ pub fn handle_stop(project_root: &Path) {
             }
         }
     }
+    Ok(())
 }
 
-pub fn handle_status(project_root: &Path) {
+pub fn handle_status(project_root: &Path) -> anyhow::Result<()> {
     let pid_path = project_root.join(".sentinel/monitor.pid");
     match read_pid_file(&pid_path) {
         None => println!("ℹ️  sentinel monitor no está corriendo como daemon."),
@@ -104,11 +126,12 @@ pub fn handle_status(project_root: &Path) {
             if is_process_alive(pid) {
                 println!("✅ sentinel monitor corriendo (PID {})", pid);
             } else {
-                println!("⚠️  PID {} encontrado pero el proceso ya no existe. Limpiando PID file.", pid);
+                eprintln!("⚠️  PID {} encontrado pero el proceso ya no existe. Limpiando PID file.", pid);
                 let _ = std::fs::remove_file(&pid_path);
             }
         }
     }
+    Ok(())
 }
 
 pub fn start_monitor() {

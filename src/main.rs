@@ -32,9 +32,15 @@ fn main() {
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
 
             if stop {
-                commands::monitor::handle_stop(&project_root);
+                if let Err(e) = commands::monitor::handle_stop(&project_root) {
+                    eprintln!("❌ Error al detener daemon: {}", e);
+                    std::process::exit(1);
+                }
             } else if status {
-                commands::monitor::handle_status(&project_root);
+                if let Err(e) = commands::monitor::handle_status(&project_root) {
+                    eprintln!("❌ Error al obtener estado: {}", e);
+                    std::process::exit(1);
+                }
             } else if daemon {
                 if let Err(e) = commands::monitor::handle_daemon(&project_root) {
                     eprintln!("❌ Error iniciando daemon: {}", e);
