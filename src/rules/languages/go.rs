@@ -200,12 +200,161 @@ impl StaticAnalyzer for GoComplexityAnalyzer {
     }
 }
 
+/// Unchecked error: detects `_, _ = call()` or `_, _ := call()` where all LHS are blank.
+pub struct GoUncheckedErrorAnalyzer;
+
+impl StaticAnalyzer for GoUncheckedErrorAnalyzer {
+    fn analyze(&self, language: &Language, source_code: &str) -> Vec<RuleViolation> {
+        let mut violations = Vec::new();
+        let mut parser = Parser::new();
+        if parser.set_language(language).is_err() { return violations; }
+        let tree = match parser.parse(source_code, None) {
+            Some(t) => t,
+            None => return violations,
+        };
+        let root = tree.root_node();
+
+        // Helper closure to process captures from a query and collect violations.
+        // We run two queries: one for `:=` (short_var_declaration) and one for `=` (assignment_statement).
+        let process_query = |query_str: &str, violations: &mut Vec<RuleViolation>| {
+            let query = match Query::new(language, query_str) {
+                Ok(q) => q,
+                Err(_) => return,
+            };
+            let mut cursor = QueryCursor::new();
+            let mut captures = cursor.captures(&query, root, source_code.as_bytes());
+            while let Some((m, _)) = captures.next() {
+                let lhs_node = m.captures.iter().find(|c| query.capture_names()[c.index as usize] == "lhs");
+                let call_node = m.captures.iter().find(|c| query.capture_names()[c.index as usize] == "call");
+                if let (Some(lhs), Some(call)) = (lhs_node, call_node) {
+                    let lhs_text = lhs.node.utf8_text(source_code.as_bytes()).unwrap_or("");
+                    if lhs_text.split(',').map(|s| s.trim()).all(|s| s == "_") {
+                        let callee = call.node.utf8_text(source_code.as_bytes()).unwrap_or("unknown");
+                        violations.push(RuleViolation {
+                            rule_name: "UNCHECKED_ERROR".to_string(),
+                            message: format!("Resultado de error descartado en llamada a {}.", callee),
+                            level: RuleLevel::Warning,
+                            line: Some(call.node.start_position().row + 1),
+                            symbol: None,
+                        });
+                    }
+                }
+            }
+        };
+
+        // `:=` short var declaration pattern
+        process_query(
+            r#"(short_var_declaration left: (expression_list) @lhs right: (expression_list (call_expression) @call))"#,
+            &mut violations,
+        );
+        // `=` assignment statement pattern
+        process_query(
+            r#"(assignment_statement left: (expression_list) @lhs right: (expression_list (call_expression) @call))"#,
+            &mut violations,
+        );
+        violations
+    }
+}
+
+/// Naming convention: detects Go constants in ALL_CAPS format (violates Go naming).
+pub struct GoNamingConventionAnalyzer;
+
+impl StaticAnalyzer for GoNamingConventionAnalyzer {
+    fn analyze(&self, language: &Language, source_code: &str) -> Vec<RuleViolation> {
+        let mut violations = Vec::new();
+        let mut parser = Parser::new();
+        if parser.set_language(language).is_err() { return violations; }
+        let tree = match parser.parse(source_code, None) {
+            Some(t) => t,
+            None => return violations,
+        };
+        let root = tree.root_node();
+
+        let query_str = r#"(const_spec name: (identifier) @const_name)"#;
+        let query = match Query::new(language, query_str) {
+            Ok(q) => q,
+            Err(_) => return violations,
+        };
+        let mut cursor = QueryCursor::new();
+        let mut captures = cursor.captures(&query, root, source_code.as_bytes());
+
+        let all_caps_re = regex::Regex::new(r"^[A-Z][A-Z0-9_]{1,}$").unwrap();
+
+        while let Some((m, _)) = captures.next() {
+            for capture in m.captures {
+                let name = capture.node.utf8_text(source_code.as_bytes()).unwrap_or("");
+                if all_caps_re.is_match(name) {
+                    violations.push(RuleViolation {
+                        rule_name: "NAMING_CONVENTION_GO".to_string(),
+                        message: format!("Constante Go en formato ALL_CAPS: '{}'. Usar PascalCase según convención Go.", name),
+                        level: RuleLevel::Info,
+                        line: Some(capture.node.start_position().row + 1),
+                        symbol: Some(name.to_string()),
+                    });
+                }
+            }
+        }
+        violations
+    }
+}
+
+/// Defer in loop: detects `defer` statements inside `for` loops.
+pub struct GoDeferInLoopAnalyzer;
+
+impl StaticAnalyzer for GoDeferInLoopAnalyzer {
+    fn analyze(&self, language: &Language, source_code: &str) -> Vec<RuleViolation> {
+        let mut violations = Vec::new();
+        let mut parser = Parser::new();
+        if parser.set_language(language).is_err() { return violations; }
+        let tree = match parser.parse(source_code, None) {
+            Some(t) => t,
+            None => return violations,
+        };
+        let root = tree.root_node();
+
+        let loop_query_str = r#"(for_statement) @loop"#;
+        let loop_query = match Query::new(language, loop_query_str) {
+            Ok(q) => q,
+            Err(_) => return violations,
+        };
+        let defer_query_str = r#"(defer_statement) @defer"#;
+        let defer_query = match Query::new(language, defer_query_str) {
+            Ok(q) => q,
+            Err(_) => return violations,
+        };
+
+        let mut l_cursor = QueryCursor::new();
+        let mut loops = l_cursor.captures(&loop_query, root, source_code.as_bytes());
+
+        while let Some((m, _)) = loops.next() {
+            for loop_cap in m.captures {
+                let loop_node = loop_cap.node;
+                let mut d_cursor = QueryCursor::new();
+                let mut defers = d_cursor.captures(&defer_query, loop_node, source_code.as_bytes());
+                if defers.next().is_some() {
+                    violations.push(RuleViolation {
+                        rule_name: "DEFER_IN_LOOP".to_string(),
+                        message: "defer dentro de un bucle: el recurso no se libera hasta que la función retorna.".to_string(),
+                        level: RuleLevel::Warning,
+                        line: Some(loop_node.start_position().row + 1),
+                        symbol: None,
+                    });
+                }
+            }
+        }
+        violations
+    }
+}
+
 /// Returns the set of static analyzers for Go files.
 pub fn analyzers() -> Vec<Box<dyn StaticAnalyzer + Send + Sync>> {
     vec![
         Box::new(GoDeadCodeAnalyzer),
         Box::new(GoUnusedImportsAnalyzer),
         Box::new(GoComplexityAnalyzer),
+        Box::new(GoUncheckedErrorAnalyzer),
+        Box::new(GoNamingConventionAnalyzer),
+        Box::new(GoDeferInLoopAnalyzer),
     ]
 }
 
@@ -288,7 +437,74 @@ func complex(x int) int {
         let result = super::super::get_language_and_analyzers("go");
         assert!(result.is_some(), "registry must return analyzers for .go files");
         let (_, analyzers) = result.unwrap();
-        assert_eq!(analyzers.len(), 3, "Go should have 3 analyzers");
+        assert_eq!(analyzers.len(), 6, "Go should have 6 analyzers");
+    }
+
+    #[test]
+    fn test_go_unchecked_error_detects_blank_error() {
+        let src = r#"package main
+
+import "os"
+
+func main() {
+    _, _ = os.Open("file.txt")
+}
+"#;
+        let lang = go_lang();
+        let analyzer = GoUncheckedErrorAnalyzer;
+        let violations = analyzer.analyze(&lang, src);
+        assert!(
+            violations.iter().any(|v| v.rule_name == "UNCHECKED_ERROR"),
+            "should detect blanked error, got: {:?}", violations
+        );
+    }
+
+    #[test]
+    fn test_go_naming_convention_detects_all_caps() {
+        let src = r#"package main
+
+const MY_CONSTANT = 42
+const GoodName = 10
+"#;
+        let lang = go_lang();
+        let analyzer = GoNamingConventionAnalyzer;
+        let violations = analyzer.analyze(&lang, src);
+        assert!(
+            violations.iter().any(|v| v.rule_name == "NAMING_CONVENTION_GO" && v.symbol.as_deref() == Some("MY_CONSTANT")),
+            "should detect MY_CONSTANT, got: {:?}", violations
+        );
+        assert!(
+            !violations.iter().any(|v| v.symbol.as_deref() == Some("GoodName")),
+            "GoodName (PascalCase) should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_go_defer_in_loop_detects_issue() {
+        let src = r#"package main
+
+import "os"
+
+func leaky() {
+    for i := 0; i < 10; i++ {
+        f, _ := os.Open("file.txt")
+        defer f.Close()
+    }
+}
+"#;
+        let lang = go_lang();
+        let analyzer = GoDeferInLoopAnalyzer;
+        let violations = analyzer.analyze(&lang, src);
+        assert!(
+            violations.iter().any(|v| v.rule_name == "DEFER_IN_LOOP"),
+            "should detect defer inside for loop, got: {:?}", violations
+        );
+    }
+
+    #[test]
+    fn test_go_registry_now_has_six_analyzers() {
+        let (_, analyzers) = super::super::get_language_and_analyzers("go").unwrap();
+        assert_eq!(analyzers.len(), 6, "Go should now have 6 analyzers");
     }
 
     #[test]
