@@ -202,9 +202,9 @@ impl StaticAnalyzer for ComplexityAnalyzer {
                     complexity += 1;
                 }
 
-                // NOTE: 10 is the hardcoded generation floor. The configured complexity_threshold
-                // can suppress violations above this floor but cannot lower it below 10.
-                if complexity > 10 {
+                // NOTE: 5 is the absolute generation floor. The configured complexity_threshold
+                // can suppress violations above this floor but cannot lower it below 5.
+                if complexity > 5 {
                     violations.push(RuleViolation {
                         rule_name: "HIGH_COMPLEXITY".to_string(),
                         message: format!("La función tiene una complejidad ciclomática de {} (máximo recomendado: 10).", complexity),
@@ -230,8 +230,8 @@ impl StaticAnalyzer for ComplexityAnalyzer {
                 let start_line = node.range().start_point.row;
                 let end_line = node.range().end_point.row;
                 let line_count = end_line.saturating_sub(start_line);
-                // NOTE: 50 is the hardcoded generation floor for function length.
-                if line_count > 50 {
+                // NOTE: 10 is the absolute generation floor for function length.
+                if line_count > 10 {
                     violations.push(RuleViolation {
                         rule_name: "FUNCTION_TOO_LONG".to_string(),
                         message: format!(
@@ -477,5 +477,38 @@ export class AppService {}";
         let v = violations.iter().find(|v| v.rule_name == "FUNCTION_TOO_LONG")
             .expect("Debería detectar FUNCTION_TOO_LONG");
         assert_eq!(v.line, Some(1), "La violación debe incluir el número de línea donde empieza la función");
+    }
+
+    #[test]
+    fn test_complexity_generates_above_floor_5() {
+        // 5 if statements = complexity 6. With old floor > 10 this was never generated.
+        // After fix the floor is > 5, so complexity 6 must be reported.
+        let lang = ts_lang();
+        let analyzer = ComplexityAnalyzer::new();
+        let code = "function f(x) {
+                      if (x>0) { return 1; }
+                      if (x>1) { return 2; }
+                      if (x>2) { return 3; }
+                      if (x>3) { return 4; }
+                      if (x>4) { return 5; }
+                      return 0;
+                    }";
+        let violations = analyzer.analyze(&lang, code);
+        let v = violations.iter().find(|v| v.rule_name == "HIGH_COMPLEXITY");
+        assert!(v.is_some(), "complexity 6 (above new floor 5) should be flagged, got: {:?}", violations);
+        assert_eq!(v.unwrap().value, Some(6));
+    }
+
+    #[test]
+    fn test_function_length_generates_above_floor_10() {
+        // A 12-line function should be flagged after lowering floor to > 10.
+        let lang = ts_lang();
+        let analyzer = ComplexityAnalyzer::new();
+        let code = format!("function f() {{
+{}}}", "  const x = 1;
+".repeat(12));
+        let violations = analyzer.analyze(&lang, &code);
+        let v = violations.iter().find(|v| v.rule_name == "FUNCTION_TOO_LONG");
+        assert!(v.is_some(), "12-line function (above new floor 10) should be flagged, got: {:?}", violations);
     }
 }

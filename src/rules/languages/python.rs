@@ -188,9 +188,9 @@ impl StaticAnalyzer for PythonComplexityAnalyzer {
                 let mut branches = b_cursor.captures(&branch_query, func_node, source_code.as_bytes());
                 let mut complexity = 1usize;
                 while branches.next().is_some() { complexity += 1; }
-                // NOTE: 10 is the hardcoded generation floor. The configured complexity_threshold
-                // can suppress violations above this floor but cannot lower it below 10.
-                if complexity > 10 {
+                // NOTE: 5 is the absolute generation floor. The configured complexity_threshold
+                // can suppress violations above this floor but cannot lower it below 5.
+                if complexity > 5 {
                     violations.push(RuleViolation {
                         rule_name: "HIGH_COMPLEXITY".to_string(),
                         message: format!("Función con complejidad ciclomática {} (máximo recomendado: 10).", complexity),
@@ -201,8 +201,8 @@ impl StaticAnalyzer for PythonComplexityAnalyzer {
                     });
                 }
                 let line_count = func_node.range().end_point.row.saturating_sub(func_node.range().start_point.row);
-                // NOTE: 50 is the hardcoded generation floor for function length.
-                if line_count > 50 {
+                // NOTE: 10 is the absolute generation floor for function length.
+                if line_count > 10 {
                     violations.push(RuleViolation {
                         rule_name: "FUNCTION_TOO_LONG".to_string(),
                         message: format!("Función de {} líneas (máximo recomendado: 50). Considera dividirla.", line_count),
