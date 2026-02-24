@@ -4,7 +4,6 @@ use crate::ui;
 use colored::*;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditIssue {
@@ -81,8 +80,8 @@ pub fn handle_audit(
     format: String,
     max_files: usize,
     concurrency: usize,
-    quiet: bool,
-    verbose: bool,
+    _quiet: bool,
+    _verbose: bool,
     agent_context: &AgentContext,
     output_mode: crate::commands::OutputMode,
     index_handle: Option<std::thread::JoinHandle<anyhow::Result<()>>>,
@@ -540,7 +539,7 @@ pub fn handle_audit(
         }
 
         // Aplicar el fix sugerido (pseudo-implementación)
-        if let Ok(mut content) = std::fs::read_to_string(file_path) {
+        if let Ok(content) = std::fs::read_to_string(file_path) {
             // En una implementación real, aquí iría lógica para parsear y aplicar fixes.
             // Por ahora simplemente log.
             let _ = content.len(); // suppres unused warning

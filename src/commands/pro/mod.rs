@@ -12,7 +12,6 @@ use crate::commands::ProCommands;
 use crate::config::SentinelConfig;
 use crate::index::IndexDb;
 use crate::index::ProjectIndexBuilder;
-use crate::commands::ignore::load_ignore_entries;
 use crate::commands::index::count_project_files;
 use colored::*;
 use std::env;
@@ -185,10 +184,10 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
 // Handler functions for remaining commands
 fn handle_analyze(
     file: &str,
-    agent_context: &AgentContext,
-    orchestrator: &crate::agents::orchestrator::AgentOrchestrator,
+    _agent_context: &AgentContext,
+    _orchestrator: &crate::agents::orchestrator::AgentOrchestrator,
     output_mode: crate::commands::OutputMode,
-    rt: &tokio::runtime::Runtime,
+    _rt: &tokio::runtime::Runtime,
 ) {
     // Placeholder - would be implemented from original pro.rs Analyze handler
     if output_mode != crate::commands::OutputMode::Quiet {
@@ -209,7 +208,7 @@ fn handle_report(
 }
 
 fn handle_split(
-    file: &str,
+    _file: &str,
     _agent_context: &AgentContext,
     _orchestrator: &crate::agents::orchestrator::AgentOrchestrator,
     output_mode: crate::commands::OutputMode,
@@ -217,12 +216,12 @@ fn handle_split(
 ) {
     // Placeholder
     if output_mode != crate::commands::OutputMode::Quiet {
-        println!("Split handler stub: {}", file);
+        println!("Split handler stub");
     }
 }
 
 fn handle_fix(
-    file: &str,
+    _file: &str,
     _agent_context: &AgentContext,
     _orchestrator: &crate::agents::orchestrator::AgentOrchestrator,
     output_mode: crate::commands::OutputMode,
@@ -230,7 +229,7 @@ fn handle_fix(
 ) {
     // Placeholder
     if output_mode != crate::commands::OutputMode::Quiet {
-        println!("Fix handler stub: {}", file);
+        println!("Fix handler stub");
     }
 }
 
@@ -273,8 +272,8 @@ fn handle_clean_cache(
 }
 
 fn handle_workflow(
-    name: &str,
-    file: Option<&str>,
+    _name: &str,
+    _file: Option<&str>,
     _agent_context: &AgentContext,
     _orchestrator: &crate::agents::orchestrator::AgentOrchestrator,
     output_mode: crate::commands::OutputMode,
@@ -282,10 +281,7 @@ fn handle_workflow(
 ) {
     // Placeholder
     if output_mode != crate::commands::OutputMode::Quiet {
-        match file {
-            Some(f) => println!("Workflow handler stub: {} {}", name, f),
-            None => println!("Workflow handler stub: {}", name),
-        }
+        println!("Workflow handler stub");
     }
 }
 

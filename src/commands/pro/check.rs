@@ -27,8 +27,8 @@ struct FileViolation {
 pub fn handle_check(
     target: String,
     format: String,
-    quiet: bool,
-    verbose: bool,
+    _quiet: bool,
+    _verbose: bool,
     agent_context: &crate::agents::base::AgentContext,
     output_mode: crate::commands::OutputMode,
     index_handle: Option<std::thread::JoinHandle<anyhow::Result<()>>>,

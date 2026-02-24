@@ -1,4 +1,4 @@
-use crate::agents::base::{Agent, AgentContext, Task, TaskType};
+use crate::agents::base::{AgentContext, Task, TaskType};
 use crate::agents::orchestrator::AgentOrchestrator;
 use crate::ui;
 use colored::*;
@@ -94,8 +94,8 @@ pub fn diff_reviews(
 }
 
 pub fn handle_review(
-    history: bool,
-    diff: bool,
+    _history: bool,
+    _diff: bool,
     _quiet: bool,
     _verbose: bool,
     agent_context: &AgentContext,
@@ -106,7 +106,7 @@ pub fn handle_review(
         eprintln!("[DEBUG] Generating review report");
     }
 
-    if history {
+    if _history {
         let records = load_review_records(&agent_context.project_root);
         if records.is_empty() {
             if output_mode != crate::commands::OutputMode::Quiet {
@@ -130,7 +130,7 @@ pub fn handle_review(
         return;
     }
 
-    if diff {
+    if _diff {
         let records = load_review_records(&agent_context.project_root);
         if records.len() < 2 {
             if output_mode != crate::commands::OutputMode::Quiet {
