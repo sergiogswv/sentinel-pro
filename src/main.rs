@@ -50,6 +50,11 @@ fn main() {
                 commands::monitor::start_monitor();
             }
         }
+        Some(Commands::Init { force }) => {
+            let project_root = crate::config::SentinelConfig::find_project_root()
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+            commands::init::handle_init_command(&project_root, force);
+        }
         Some(Commands::Ignore { rule, file, symbol, list, clear }) => {
             commands::ignore::handle_ignore_command(rule, file, symbol, list, clear);
         }

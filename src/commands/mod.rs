@@ -1,4 +1,5 @@
 pub mod ignore;
+pub mod init;
 pub mod index;
 pub mod monitor;
 pub mod pro;
@@ -52,6 +53,12 @@ pub enum Commands {
         /// Mostrar estado del índice sin modificar nada
         #[arg(long)]
         check: bool,
+    },
+    /// Inicializa la configuración de Sentinel en el proyecto actual
+    Init {
+        /// Sobrescribir configuración existente si la hay
+        #[arg(long)]
+        force: bool,
     },
     /// Lista las reglas activas con umbrales configurables
     Rules,
