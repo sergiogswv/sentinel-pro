@@ -1,8 +1,10 @@
 pub mod engine;
 pub mod languages;
 pub mod static_analysis;
+pub mod custom;
 
 pub use engine::RuleEngine;
+pub use custom::{load_custom_rules, execute_custom_rules, CustomRule, RuleSeverity, RuleViolation as CustomRuleViolation};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
