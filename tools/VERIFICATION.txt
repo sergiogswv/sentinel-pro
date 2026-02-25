@@ -1,0 +1,11 @@
+VERIFICATION
+
+Verification is intended to assist the Chocolatey community in verifying that this package's contents are trustworthy.
+
+Files are signed with SHA256.
+
+The following checksums are provided for the x86_64-pc-windows-msvc binary:
+  sentinel-pro-5.0.0-pro.beta.3-x86_64-pc-windows-msvc.zip: PLACEHOLDER_CHECKSUM
+
+These checksums can be verified from the GitHub Release page:
+https://github.com/sentinel-team/sentinel-pro/releases/tag/v5.0.0-pro.beta.3
