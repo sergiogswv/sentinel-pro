@@ -22,6 +22,7 @@ pub mod rules;
 pub mod stats;
 pub mod tests;
 pub mod ui;
+pub mod telemetry;
 
 fn main() {
     let cli = Cli::parse();
