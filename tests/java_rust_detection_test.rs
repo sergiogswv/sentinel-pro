@@ -13,7 +13,7 @@ fn test_detect_java_project_with_pom_xml() {
         .expect("Failed to write pom.xml");
 
     assert!(
-        sentinel_rust::config::SentinelConfig::detect_java_project(project_path),
+        sentinel_pro::config::SentinelConfig::detect_java_project(project_path),
         "Should detect Java project with pom.xml"
     );
 }
@@ -28,7 +28,7 @@ fn test_detect_java_project_with_gradle() {
         .expect("Failed to write build.gradle");
 
     assert!(
-        sentinel_rust::config::SentinelConfig::detect_java_project(project_path),
+        sentinel_pro::config::SentinelConfig::detect_java_project(project_path),
         "Should detect Java project with build.gradle"
     );
 }
@@ -43,7 +43,7 @@ fn test_detect_java_project_with_gradle_kts() {
         .expect("Failed to write build.gradle.kts");
 
     assert!(
-        sentinel_rust::config::SentinelConfig::detect_java_project(project_path),
+        sentinel_pro::config::SentinelConfig::detect_java_project(project_path),
         "Should detect Java project with build.gradle.kts"
     );
 }
@@ -58,7 +58,7 @@ fn test_detect_java_project_with_src_structure() {
     fs::create_dir_all(&src_main_java).expect("Failed to create src/main/java");
 
     assert!(
-        sentinel_rust::config::SentinelConfig::detect_java_project(project_path),
+        sentinel_pro::config::SentinelConfig::detect_java_project(project_path),
         "Should detect Java project with src/main/java structure"
     );
 }
@@ -75,7 +75,7 @@ fn test_detect_java_project_with_java_files() {
         .expect("Failed to write Java file");
 
     assert!(
-        sentinel_rust::config::SentinelConfig::detect_java_project(project_path),
+        sentinel_pro::config::SentinelConfig::detect_java_project(project_path),
         "Should detect Java project with .java files"
     );
 }
@@ -90,7 +90,7 @@ fn test_detect_rust_project_with_cargo_toml() {
         .expect("Failed to write Cargo.toml");
 
     assert!(
-        sentinel_rust::config::SentinelConfig::detect_rust_project(project_path),
+        sentinel_pro::config::SentinelConfig::detect_rust_project(project_path),
         "Should detect Rust project with Cargo.toml"
     );
 }
@@ -105,7 +105,7 @@ fn test_detect_rust_project_with_cargo_lock() {
         .expect("Failed to write Cargo.lock");
 
     assert!(
-        sentinel_rust::config::SentinelConfig::detect_rust_project(project_path),
+        sentinel_pro::config::SentinelConfig::detect_rust_project(project_path),
         "Should detect Rust project with Cargo.lock"
     );
 }
@@ -122,7 +122,7 @@ fn test_detect_rust_project_with_rs_files() {
         .expect("Failed to write Rust file");
 
     assert!(
-        sentinel_rust::config::SentinelConfig::detect_rust_project(project_path),
+        sentinel_pro::config::SentinelConfig::detect_rust_project(project_path),
         "Should detect Rust project with .rs files"
     );
 }
@@ -134,12 +134,12 @@ fn test_detect_no_java_or_rust_project() {
 
     // Create neither Java nor Rust project markers
     assert!(
-        !sentinel_rust::config::SentinelConfig::detect_java_project(project_path),
+        !sentinel_pro::config::SentinelConfig::detect_java_project(project_path),
         "Should not detect Java project"
     );
 
     assert!(
-        !sentinel_rust::config::SentinelConfig::detect_rust_project(project_path),
+        !sentinel_pro::config::SentinelConfig::detect_rust_project(project_path),
         "Should not detect Rust project"
     );
 }
@@ -159,7 +159,7 @@ fn test_detect_project_languages_mixed() {
     fs::write(project_path.join("package.json"), "{}\n")
         .expect("Failed to write package.json");
 
-    let detected = sentinel_rust::config::SentinelConfig::detect_project_languages(project_path);
+    let detected = sentinel_pro::config::SentinelConfig::detect_project_languages(project_path);
 
     assert!(
         detected.contains(&"java".to_string()),
@@ -184,7 +184,7 @@ fn test_detect_project_languages_typescript() {
     fs::write(project_path.join("package.json"), "{}\n")
         .expect("Failed to write package.json");
 
-    let detected = sentinel_rust::config::SentinelConfig::detect_project_languages(project_path);
+    let detected = sentinel_pro::config::SentinelConfig::detect_project_languages(project_path);
 
     assert!(
         detected.contains(&"typescript".to_string()),
@@ -201,7 +201,7 @@ fn test_detect_project_languages_python() {
     fs::write(project_path.join("setup.py"), "# setup\n")
         .expect("Failed to write setup.py");
 
-    let detected = sentinel_rust::config::SentinelConfig::detect_project_languages(project_path);
+    let detected = sentinel_pro::config::SentinelConfig::detect_project_languages(project_path);
 
     assert!(
         detected.contains(&"python".to_string()),
@@ -218,7 +218,7 @@ fn test_detect_project_languages_python_pyproject() {
     fs::write(project_path.join("pyproject.toml"), "[project]\n")
         .expect("Failed to write pyproject.toml");
 
-    let detected = sentinel_rust::config::SentinelConfig::detect_project_languages(project_path);
+    let detected = sentinel_pro::config::SentinelConfig::detect_project_languages(project_path);
 
     assert!(
         detected.contains(&"python".to_string()),
@@ -235,7 +235,7 @@ fn test_detect_project_languages_python_requirements() {
     fs::write(project_path.join("requirements.txt"), "numpy==1.0\n")
         .expect("Failed to write requirements.txt");
 
-    let detected = sentinel_rust::config::SentinelConfig::detect_project_languages(project_path);
+    let detected = sentinel_pro::config::SentinelConfig::detect_project_languages(project_path);
 
     assert!(
         detected.contains(&"python".to_string()),
@@ -252,7 +252,7 @@ fn test_detect_project_languages_go() {
     fs::write(project_path.join("go.mod"), "module example.com/app\n")
         .expect("Failed to write go.mod");
 
-    let detected = sentinel_rust::config::SentinelConfig::detect_project_languages(project_path);
+    let detected = sentinel_pro::config::SentinelConfig::detect_project_languages(project_path);
 
     assert!(
         detected.contains(&"go".to_string()),
@@ -266,7 +266,7 @@ fn test_detect_project_languages_empty() {
     let project_path = temp_dir.path();
 
     // No project markers
-    let detected = sentinel_rust::config::SentinelConfig::detect_project_languages(project_path);
+    let detected = sentinel_pro::config::SentinelConfig::detect_project_languages(project_path);
 
     assert!(detected.is_empty(), "Should not detect any languages");
 }
@@ -292,7 +292,7 @@ fn test_detect_project_languages_comprehensive() {
     fs::write(project_path.join("pyproject.toml"), "[project]\n")
         .expect("Failed to write pyproject.toml");
 
-    let detected = sentinel_rust::config::SentinelConfig::detect_project_languages(project_path);
+    let detected = sentinel_pro::config::SentinelConfig::detect_project_languages(project_path);
 
     assert_eq!(detected.len(), 5, "Should detect all 5 languages");
     assert!(detected.contains(&"java".to_string()));

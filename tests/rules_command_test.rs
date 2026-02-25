@@ -13,7 +13,7 @@ fn test_rules_command_displays_framework_rules() {
     // The rules command should work even without a config file
     // It will display default rules
     // We can't easily capture stdout in unit tests, so we just verify it doesn't panic
-    sentinel_rust::commands::rules::handle_rules_command(project_path);
+    sentinel_pro::commands::rules::handle_rules_command(project_path);
 
     // Test passes if we get here without panicking
     assert!(true);
@@ -43,7 +43,7 @@ enabled: true
 
     // The rules command should display both framework and custom rules
     // We just verify it doesn't panic
-    sentinel_rust::commands::rules::handle_rules_command(project_path);
+    sentinel_pro::commands::rules::handle_rules_command(project_path);
 
     // Test passes if we get here without panicking
     assert!(true);
@@ -84,7 +84,7 @@ enabled: true
         .expect("Failed to write rule 2");
 
     // The rules command should display all custom rules
-    sentinel_rust::commands::rules::handle_rules_command(project_path);
+    sentinel_pro::commands::rules::handle_rules_command(project_path);
 
     // Test passes if we get here without panicking
     assert!(true);
@@ -128,7 +128,7 @@ enabled: true
         .expect("Failed to write JSON rule");
 
     // The rules command should handle both formats
-    sentinel_rust::commands::rules::handle_rules_command(project_path);
+    sentinel_pro::commands::rules::handle_rules_command(project_path);
 
     // Test passes if we get here without panicking
     assert!(true);
@@ -157,7 +157,7 @@ enabled: false
         .expect("Failed to write rule file");
 
     // The rules command should display disabled rules with [OFF] status
-    sentinel_rust::commands::rules::handle_rules_command(project_path);
+    sentinel_pro::commands::rules::handle_rules_command(project_path);
 
     // Test passes if we get here without panicking
     assert!(true);
@@ -170,7 +170,7 @@ fn test_rules_command_without_custom_rules_directory() {
 
     // Don't create custom rules directory
     // The rules command should still work and only show framework rules
-    sentinel_rust::commands::rules::handle_rules_command(project_path);
+    sentinel_pro::commands::rules::handle_rules_command(project_path);
 
     // Test passes if we get here without panicking
     assert!(true);

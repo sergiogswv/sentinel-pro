@@ -24,7 +24,7 @@ fn test_capa3_polyglot_project_detection() {
         .expect("Failed to create go.mod");
 
     // Detect all languages
-    let detected = sentinel_rust::config::SentinelConfig::detect_project_languages(project_path);
+    let detected = sentinel_pro::config::SentinelConfig::detect_project_languages(project_path);
 
     // Verify all languages are detected
     assert!(detected.contains(&"rust".to_string()), "Should detect Rust");
@@ -70,7 +70,7 @@ enabled: true
         .expect("Failed to write rule 2");
 
     // Initialize rule engine with custom rules
-    let mut engine = sentinel_rust::rules::RuleEngine::new()
+    let mut engine = sentinel_pro::rules::RuleEngine::new()
         .with_project_path(project_path);
 
     engine.load_custom_rules().expect("Failed to load custom rules");
@@ -101,7 +101,7 @@ fn test_capa3_detect_rust_and_java_projects() {
 
     // Verify Rust detection
     assert!(
-        sentinel_rust::config::SentinelConfig::detect_rust_project(project_path),
+        sentinel_pro::config::SentinelConfig::detect_rust_project(project_path),
         "Should detect Rust project"
     );
 
@@ -117,7 +117,7 @@ fn test_capa3_detect_rust_and_java_projects() {
 
     // Verify Java detection in subdirectory
     assert!(
-        sentinel_rust::config::SentinelConfig::detect_java_project(&java_subdir),
+        sentinel_pro::config::SentinelConfig::detect_java_project(&java_subdir),
         "Should detect Java project in subdirectory"
     );
 }
@@ -192,8 +192,8 @@ fn test_capa3_github_actions_workflows_complete() {
 fn test_capa3_language_parser_supports_java_rust() {
     // Test Java parsing
     let java_code = "public class Example { }";
-    let mut java_parser = sentinel_rust::rules::language_support::LanguageParser::new(
-        sentinel_rust::rules::language_support::SupportedLanguage::Java,
+    let mut java_parser = sentinel_pro::rules::language_support::LanguageParser::new(
+        sentinel_pro::rules::language_support::SupportedLanguage::Java,
     )
     .expect("Failed to create Java parser");
 
@@ -202,8 +202,8 @@ fn test_capa3_language_parser_supports_java_rust() {
 
     // Test Rust parsing
     let rust_code = "fn test() { }";
-    let mut rust_parser = sentinel_rust::rules::language_support::LanguageParser::new(
-        sentinel_rust::rules::language_support::SupportedLanguage::Rust,
+    let mut rust_parser = sentinel_pro::rules::language_support::LanguageParser::new(
+        sentinel_pro::rules::language_support::SupportedLanguage::Rust,
     )
     .expect("Failed to create Rust parser");
 
@@ -236,7 +236,7 @@ enabled: true
         .expect("Failed to write rule");
 
     // Create rule engine and load custom rules
-    let mut engine = sentinel_rust::rules::RuleEngine::new()
+    let mut engine = sentinel_pro::rules::RuleEngine::new()
         .with_project_path(project_path);
 
     engine.load_custom_rules().expect("Failed to load custom rules");
@@ -283,7 +283,7 @@ fn test_capa3_mixed_language_project_structure() {
         .expect("Failed to write go.mod");
 
     // Detect languages
-    let detected = sentinel_rust::config::SentinelConfig::detect_project_languages(project_path);
+    let detected = sentinel_pro::config::SentinelConfig::detect_project_languages(project_path);
 
     assert!(
         detected.contains(&"typescript".to_string()),
@@ -331,12 +331,12 @@ enabled: true
 
     // Verify Rust project detection
     assert!(
-        sentinel_rust::config::SentinelConfig::detect_rust_project(project_path),
+        sentinel_pro::config::SentinelConfig::detect_rust_project(project_path),
         "Should detect Rust project"
     );
 
     // Create and configure rule engine with custom rules
-    let mut engine = sentinel_rust::rules::RuleEngine::new()
+    let mut engine = sentinel_pro::rules::RuleEngine::new()
         .with_project_path(project_path);
 
     engine.load_custom_rules().expect("Failed to load custom rules");

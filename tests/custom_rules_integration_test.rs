@@ -27,7 +27,7 @@ enabled: true
         .expect("Failed to write rule file");
 
     // Load rules into engine
-    let mut engine = sentinel_rust::rules::RuleEngine::new()
+    let mut engine = sentinel_pro::rules::RuleEngine::new()
         .with_project_path(project_path);
 
     engine.load_custom_rules()
@@ -60,7 +60,7 @@ enabled: true
         .expect("Failed to write rule file");
 
     // Create and configure engine
-    let mut engine = sentinel_rust::rules::RuleEngine::new()
+    let mut engine = sentinel_pro::rules::RuleEngine::new()
         .with_project_path(project_path);
 
     engine.load_custom_rules()
@@ -88,7 +88,7 @@ fn test_rule_engine_empty_custom_rules_directory() {
     fs::create_dir_all(&rules_dir).expect("Failed to create rules dir");
 
     // Load rules - should succeed with empty list
-    let mut engine = sentinel_rust::rules::RuleEngine::new()
+    let mut engine = sentinel_pro::rules::RuleEngine::new()
         .with_project_path(project_path);
 
     let result = engine.load_custom_rules();
@@ -103,7 +103,7 @@ fn test_rule_engine_no_custom_rules_directory() {
     let project_path = temp_dir.path();
 
     // Don't create .sentinel/custom-rules directory at all
-    let engine = sentinel_rust::rules::RuleEngine::new()
+    let engine = sentinel_pro::rules::RuleEngine::new()
         .with_project_path(project_path);
 
     // Note: We can't call load_custom_rules without making engine mutable,
@@ -117,7 +117,7 @@ fn test_rule_engine_validates_file_without_custom_rules() {
     let project_path = temp_dir.path();
 
     // Create engine without loading any custom rules
-    let engine = sentinel_rust::rules::RuleEngine::new()
+    let engine = sentinel_pro::rules::RuleEngine::new()
         .with_project_path(project_path);
 
     // Don't call load_custom_rules
@@ -170,7 +170,7 @@ enabled: true
         .expect("Failed to write JSON rule");
 
     // Load rules
-    let mut engine = sentinel_rust::rules::RuleEngine::new()
+    let mut engine = sentinel_pro::rules::RuleEngine::new()
         .with_project_path(project_path);
 
     engine.load_custom_rules()
@@ -203,7 +203,7 @@ enabled: true
         .expect("Failed to write rule file");
 
     // Load rules
-    let mut engine = sentinel_rust::rules::RuleEngine::new()
+    let mut engine = sentinel_pro::rules::RuleEngine::new()
         .with_project_path(project_path);
 
     engine.load_custom_rules()

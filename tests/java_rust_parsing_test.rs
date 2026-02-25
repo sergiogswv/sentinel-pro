@@ -1,6 +1,6 @@
 //! Integration tests for Java and Rust language parsing with Tree-sitter
 
-use sentinel_rust::rules::language_support::{
+use sentinel_pro::rules::language_support::{
     LanguageParser, SupportedLanguage, detect_language_from_extension, execute_query,
 };
 
