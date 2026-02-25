@@ -5,3 +5,4 @@
 .sentinelrc.toml
 errors.txt
 .qdrant-initialized
+.worktrees/
