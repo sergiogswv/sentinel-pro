@@ -8,13 +8,37 @@ pub use schema::{CustomRule, RuleSeverity};
 pub use loader::CustomRulesLoader;
 pub use executor::CustomRulesExecutor;
 
-/// Load and execute custom rules from .sentinel/custom-rules/
+/// Load all custom rules from the .sentinel/custom-rules/ directory.
+///
+/// Loads both YAML and JSON rule files from the custom rules directory.
+/// If the directory doesn't exist, returns an empty vector.
+///
+/// # Arguments
+///
+/// * `project_path` - The root path of the project where .sentinel/custom-rules/ is located
+///
+/// # Returns
+///
+/// A Result containing a vector of loaded CustomRule variants, or an error message if loading fails.
 pub fn load_custom_rules(project_path: &std::path::Path) -> Result<Vec<CustomRule>, String> {
     let loader = CustomRulesLoader::new(project_path);
     loader.load_all()
 }
 
-/// Execute custom rules against a file
+/// Execute custom rules against a file's content.
+///
+/// Checks the given file content against all provided custom rules, respecting the enabled
+/// field of each rule. Returns violations found in the file.
+///
+/// # Arguments
+///
+/// * `rules` - Slice of custom rules to execute
+/// * `file_content` - The content of the file to check
+/// * `file_path` - The path to the file (used for pattern matching)
+///
+/// # Returns
+///
+/// A vector of RuleViolation instances found in the file.
 pub fn execute_custom_rules(
     rules: &[CustomRule],
     file_content: &str,
