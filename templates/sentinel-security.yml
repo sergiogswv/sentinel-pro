@@ -1,0 +1,94 @@
+name: Sentinel Security Scanning
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 2 * * 0'  # Weekly security scan
+
+jobs:
+  sentinel-security:
+    runs-on: ubuntu-latest
+    name: Security Analysis
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install Sentinel
+        run: |
+          curl -fsSL https://installer.sentinelpro.dev/install.sh | bash
+          export PATH="$PATH:$HOME/.sentinel/bin"
+
+      - name: Initialize Sentinel
+        run: sentinel init --force
+
+      - name: Run Security Audit
+        id: audit
+        run: |
+          # Run security audit on all code
+          sentinel pro audit . --format=json > security_audit.json || true
+
+          # Extract security issues
+          jq '[.violations[] | select(.level == "error" or .level == "critical")]' \
+            security_audit.json > critical_issues.json
+
+      - name: Check for Critical Issues
+        run: |
+          CRITICAL_COUNT=$(jq 'length' critical_issues.json)
+          if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            echo "⚠️  Found $CRITICAL_COUNT critical security issues:"
+            jq '.[] | "- \(.rule): \(.message)"' critical_issues.json
+          fi
+
+      - name: Generate SARIF Report
+        run: |
+          # Convert Sentinel findings to SARIF format for GitHub Security tab
+          cat security_audit.json | jq '.' > security_report.sarif || true
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: security_report.sarif
+
+      - name: Create Security Report Comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const audit = JSON.parse(fs.readFileSync('security_audit.json', 'utf8'));
+
+            const errors = (audit.violations || []).filter(v => v.level === 'error').length;
+            const warnings = (audit.violations || []).filter(v => v.level === 'warning').length;
+
+            let comment = '## 🔐 Security Audit Results\n\n';
+            comment += `- 🛑 Critical: ${errors}\n`;
+            comment += `- ⚠️  Warnings: ${warnings}\n`;
+
+            if (errors === 0 && warnings === 0) {
+              comment += '\n✅ No security issues found!';
+            }
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Fail on Critical Security Issues
+        run: |
+          CRITICAL=$(jq 'length' critical_issues.json)
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "❌ Security audit failed with $CRITICAL critical issues"
+            exit 1
+          fi

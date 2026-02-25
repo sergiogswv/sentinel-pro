@@ -91,6 +91,19 @@ fn main() {
 
             commands::precommit::handle_precommit_command(&project_root, action);
         }
+        Some(Commands::GitHubActions { workflow_type }) => {
+            let project_root = crate::config::SentinelConfig::find_project_root()
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+            let action = match workflow_type.as_str() {
+                "analysis" => commands::github_actions::WorkflowType::Analysis,
+                "tests" => commands::github_actions::WorkflowType::Tests,
+                "security" => commands::github_actions::WorkflowType::Security,
+                _ => commands::github_actions::WorkflowType::All,
+            };
+
+            commands::github_actions::handle_github_actions_command(&project_root, action);
+        }
         None => {
             // Comportamiento por defecto (legacy)
             commands::monitor::start_monitor();

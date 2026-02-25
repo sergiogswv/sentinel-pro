@@ -6,6 +6,7 @@ pub mod monitor;
 pub mod pro;
 pub mod rules;
 pub mod precommit;
+pub mod github_actions;
 
 use clap::{Parser, Subcommand};
 
@@ -108,6 +109,12 @@ pub enum Commands {
         /// Mostrar estado del hook pre-commit
         #[arg(long)]
         status: bool,
+    },
+    /// Gestión de workflows de GitHub Actions
+    GitHubActions {
+        /// Tipo de workflow a instalar
+        #[arg(value_parser = ["analysis", "tests", "security", "all"], default_value = "all")]
+        workflow_type: String,
     },
     /// Comandos avanzados de la versión Pro
     Pro {

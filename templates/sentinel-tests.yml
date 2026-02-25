@@ -1,0 +1,90 @@
+name: Sentinel Test Execution
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  sentinel-tests:
+    runs-on: ubuntu-latest
+    name: Execute Tests with Sentinel
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Sentinel
+        run: |
+          curl -fsSL https://installer.sentinelpro.dev/install.sh | bash
+          export PATH="$PATH:$HOME/.sentinel/bin"
+
+      - name: Set up runtime
+        run: |
+          # Detect and set up the appropriate runtime
+          if [ -f package.json ]; then
+            echo "Node.js project detected"
+            uses: actions/setup-node@v3
+            with:
+              node-version: '18'
+          elif [ -f Cargo.toml ]; then
+            echo "Rust project detected"
+            uses: actions-rs/toolchain@v1
+            with:
+              toolchain: stable
+          elif [ -f go.mod ]; then
+            echo "Go project detected"
+            uses: actions/setup-go@v4
+            with:
+              go-version: '1.21'
+          elif [ -f pom.xml ] || [ -f build.gradle ]; then
+            echo "Java project detected"
+            uses: actions/setup-java@v3
+            with:
+              java-version: '17'
+              distribution: 'temurin'
+          fi
+
+      - name: Initialize Sentinel
+        run: sentinel init --force
+
+      - name: Run Tests
+        id: tests
+        run: |
+          # Run the project's test suite with Sentinel monitoring
+          sentinel pro test-all
+          TEST_RESULT=$?
+
+          echo "test_result=$TEST_RESULT" >> $GITHUB_OUTPUT
+          exit $TEST_RESULT
+
+      - name: Generate Test Report
+        if: always()
+        run: |
+          # Generate a detailed test report
+          sentinel pro report --format=json > test_report.json || true
+          cat test_report.json
+
+      - name: Upload Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-reports
+          path: |
+            test_report.json
+            coverage/
+
+      - name: Comment PR with Test Results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const testResult = '${{ steps.tests.outputs.test_result }}';
+            const status = testResult === '0' ? '✅ Passed' : '❌ Failed';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Test Results\n\nTests: ${status}`
+            });

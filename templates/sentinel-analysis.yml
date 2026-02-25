@@ -1,0 +1,69 @@
+name: Sentinel Code Analysis
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  sentinel-analysis:
+    runs-on: ubuntu-latest
+    name: Static Code Analysis
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Full history for better analysis
+
+      - name: Install Sentinel
+        run: |
+          # Download and install Sentinel Pro
+          curl -fsSL https://installer.sentinelpro.dev/install.sh | bash
+          export PATH="$PATH:$HOME/.sentinel/bin"
+
+      - name: Initialize Sentinel
+        run: sentinel init --force
+
+      - name: Run Code Analysis
+        id: analysis
+        run: |
+          # Run comprehensive code analysis
+          sentinel pro check . --format=json > analysis_results.json || true
+
+          # Display results
+          cat analysis_results.json | jq '.'
+
+      - name: Comment PR with Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('analysis_results.json', 'utf8'));
+
+            let comment = '## 🔍 Sentinel Code Analysis Results\n\n';
+            if (results.violations && results.violations.length > 0) {
+              comment += `Found ${results.violations.length} issues:\n`;
+              results.violations.slice(0, 10).forEach(v => {
+                comment += `- **${v.rule}** (${v.level}): ${v.message}\n`;
+              });
+            } else {
+              comment += 'No issues found! ✅\n';
+            }
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Fail if Critical Issues
+        run: |
+          # Exit with error if critical issues found
+          CRITICAL=$(jq '[.violations[] | select(.level == "error")] | length' analysis_results.json)
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "❌ Found $CRITICAL critical issues"
+            exit 1
+          fi
