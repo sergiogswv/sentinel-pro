@@ -1,8 +1,20 @@
 [package]
-name = "sentinel-rust"
+name = "sentinel-pro"
 version = "5.0.0-pro.beta.3"
-edition = "2024"
+edition = "2021"
 license = "AGPL-3.0-only"
+authors = ["Sentinel Team"]
+description = "Code quality analysis and architecture validation tool"
+homepage = "https://github.com/sentinel-team/sentinel-pro"
+documentation = "https://docs.sentinel.dev"
+repository = "https://github.com/sentinel-team/sentinel-pro"
+readme = "README.md"
+keywords = ["quality", "analysis", "code", "architecture"]
+categories = ["development-tools"]
+publish = true
+
+[package.metadata.docs.rs]
+all-features = true
 
 [[bin]]
 name = "sentinel"
