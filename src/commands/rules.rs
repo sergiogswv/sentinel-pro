@@ -1,14 +1,16 @@
 use crate::config::SentinelConfig;
+use crate::rules::load_custom_rules;
 use colored::Colorize;
+use std::path::Path;
 
-pub fn handle_rules_command(project_root: &std::path::Path) {
+pub fn handle_rules_command(project_root: &Path) {
     let config = SentinelConfig::load(project_root);
     let rule_cfg = config
         .as_ref()
         .map(|c| c.rule_config.clone())
         .unwrap_or_default();
 
-    println!("\n{}", "Reglas activas:".bold());
+    println!("\n{}", "Reglas Framework:".bold());
 
     struct Rule {
         name: &'static str,
@@ -52,4 +54,52 @@ pub fn handle_rules_command(project_root: &std::path::Path) {
     println!("   function_length_threshold = {}", rule_cfg.function_length_threshold);
     println!("   dead_code_enabled = {}", rule_cfg.dead_code_enabled);
     println!("   unused_imports_enabled = {}", rule_cfg.unused_imports_enabled);
+
+    // Display custom rules if they exist
+    match load_custom_rules(project_root) {
+        Ok(custom_rules) => {
+            if !custom_rules.is_empty() {
+                println!("\n{}", "Reglas Personalizadas:".bold());
+                for rule in custom_rules {
+                    match rule {
+                        crate::rules::CustomRule::Pattern(p) => {
+                            let status = if p.enabled { "[ON] " } else { "[OFF]" };
+                            let level_str = match p.severity {
+                                crate::rules::RuleSeverity::Info => "[info]",
+                                crate::rules::RuleSeverity::Warning => "[warning]",
+                                crate::rules::RuleSeverity::Error => "[error]",
+                            };
+                            println!(
+                                "  {} {:<28} {:<12} {}",
+                                status.green(),
+                                p.name.yellow(),
+                                level_str,
+                                p.message
+                            );
+                        }
+                        crate::rules::CustomRule::Ast(a) => {
+                            let status = if a.enabled { "[ON] " } else { "[OFF]" };
+                            let level_str = match a.severity {
+                                crate::rules::RuleSeverity::Info => "[info]",
+                                crate::rules::RuleSeverity::Warning => "[warning]",
+                                crate::rules::RuleSeverity::Error => "[error]",
+                            };
+                            println!(
+                                "  {} {:<28} {:<12} {} ({})",
+                                status.green(),
+                                a.name.yellow(),
+                                level_str,
+                                a.message,
+                                a.language.cyan()
+                            );
+                        }
+                    }
+                }
+                println!("\n   Info: Las reglas personalizadas se cargan desde .sentinel/custom-rules/");
+            }
+        }
+        Err(e) => {
+            eprintln!("   {} Error al cargar reglas personalizadas: {}", "⚠".yellow(), e);
+        }
+    }
 }
