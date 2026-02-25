@@ -112,9 +112,10 @@ pub fn handle_init_command(project_root: &Path, force: bool) {
             let config_path = project_root.join(".sentinelrc.toml");
             println!("   ✅ Configuración creada en: {}", config_path.display().to_string().cyan());
             println!("\n   {} Próximos pasos:", "💡".yellow());
-            println!("      sentinel pro check src/    # análisis estático");
-            println!("      sentinel pro audit src/    # auditoría interactiva");
-            println!("      sentinel pro review        # review arquitectónico con IA");
+            println!("      sentinel pro check src/     # análisis estático");
+            println!("      sentinel pro audit src/     # auditoría interactiva");
+            println!("      sentinel pro review         # review arquitectónico con IA");
+            println!("      sentinel monitor            # monitorear cambios en tiempo real");
         }
         Err(e) => {
             // Fix 3: removed duplicate --force hint; the error message already contains it
