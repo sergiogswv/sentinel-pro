@@ -74,6 +74,23 @@ fn main() {
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
             commands::rules::handle_rules_command(&project_root);
         }
+        Some(Commands::PreCommit { install, uninstall, status }) => {
+            let project_root = crate::config::SentinelConfig::find_project_root()
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+            let action = if install {
+                commands::precommit::PreCommitAction::Install
+            } else if uninstall {
+                commands::precommit::PreCommitAction::Uninstall
+            } else if status {
+                commands::precommit::PreCommitAction::Status
+            } else {
+                // Default to status if no action specified
+                commands::precommit::PreCommitAction::Status
+            };
+
+            commands::precommit::handle_precommit_command(&project_root, action);
+        }
         None => {
             // Comportamiento por defecto (legacy)
             commands::monitor::start_monitor();

@@ -5,6 +5,7 @@ pub mod index;
 pub mod monitor;
 pub mod pro;
 pub mod rules;
+pub mod precommit;
 
 use clap::{Parser, Subcommand};
 
@@ -96,6 +97,18 @@ pub enum Commands {
     Doctor,
     /// Lista las reglas activas con umbrales configurables
     Rules,
+    /// Gestión de hooks pre-commit para Git
+    PreCommit {
+        /// Instalar el hook pre-commit
+        #[arg(long)]
+        install: bool,
+        /// Desinstalar el hook pre-commit
+        #[arg(long)]
+        uninstall: bool,
+        /// Mostrar estado del hook pre-commit
+        #[arg(long)]
+        status: bool,
+    },
     /// Comandos avanzados de la versión Pro
     Pro {
         #[command(subcommand)]
