@@ -80,7 +80,9 @@ impl Agent for FixSuggesterAgent {
     }
 
     async fn execute(&self, task: &Task, context: &AgentContext) -> anyhow::Result<TaskResult> {
-        println!("   🤖 FixSuggesterAgent: Analizando y preparando correcciones...");
+        if std::env::var("VERBOSE").is_ok() {
+            eprintln!("   🤖 FixSuggesterAgent: Analizando y preparando correcciones...");
+        }
 
         let rag_context = if let Some(path) = &task.file_path {
             context.build_rag_context(path)

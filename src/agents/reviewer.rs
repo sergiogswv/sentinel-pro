@@ -78,7 +78,10 @@ impl Agent for ReviewerAgent {
     }
 
     async fn execute(&self, task: &Task, context: &AgentContext) -> anyhow::Result<TaskResult> {
-        println!("   🧐 ReviewerAgent: Iniciando revisión del proyecto...");
+        // Only log in verbose mode to avoid console spam in parallel execution
+        if std::env::var("VERBOSE").is_ok() || std::env::var("RUST_LOG").is_ok() {
+            eprintln!("   🧐 ReviewerAgent: Iniciando revisión del proyecto...");
+        }
 
         let rag_context = if let Some(path) = &task.file_path {
             context.build_rag_context(path)

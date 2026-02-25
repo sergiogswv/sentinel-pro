@@ -55,8 +55,10 @@ impl WorkflowEngine {
         agent_context: &AgentContext,
         initial_file: Option<String>,
     ) -> anyhow::Result<WorkflowContext> {
-        println!("🚀 Iniciando Workflow: {}...", workflow.name.cyan().bold());
-        
+        if std::env::var("VERBOSE").is_ok() || std::env::var("RUST_LOG").is_ok() {
+            eprintln!("🚀 Iniciando Workflow: {}...", workflow.name.cyan().bold());
+        }
+
         let mut wf_context = WorkflowContext::new(initial_file);
 
         for (i, step) in workflow.steps.iter().enumerate() {

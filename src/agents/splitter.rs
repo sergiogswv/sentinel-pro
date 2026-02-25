@@ -476,7 +476,9 @@ impl Agent for SplitterAgent {
     }
 
     async fn execute(&self, task: &Task, context: &AgentContext) -> anyhow::Result<TaskResult> {
-        println!("   ✂️  SplitterAgent: Analizando estructura del archivo...");
+        if std::env::var("VERBOSE").is_ok() || std::env::var("RUST_LOG").is_ok() {
+            eprintln!("   ✂️  SplitterAgent: Analizando estructura del archivo...");
+        }
 
         let content = task.context.as_deref().unwrap_or("");
         let language = &context.config.code_language;

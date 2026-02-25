@@ -69,7 +69,9 @@ impl Agent for TesterAgent {
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "archivo".to_string());
-        println!("   🧪 TesterAgent: generando test para '{}'...", file_hint);
+        if std::env::var("VERBOSE").is_ok() || std::env::var("RUST_LOG").is_ok() {
+            eprintln!("   🧪 TesterAgent: generando test para '{}'...", file_hint);
+        }
 
         let rag_context = if let Some(path) = &task.file_path {
             context.build_rag_context(path)
