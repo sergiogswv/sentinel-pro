@@ -141,6 +141,10 @@ pub struct SentinelConfig {
     pub ml: Option<MlConfig>,
     #[serde(default)]
     pub rule_config: RuleConfig,
+
+    // --- Language Detection (Capa 3) ---
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected_languages: Option<Vec<String>>, // Auto-detected: ["java", "rust", "typescript", etc.]
 }
 
 impl SentinelConfig {
@@ -203,6 +207,7 @@ impl SentinelConfig {
                 bug_predictor_model: "bug-predictor-v1".to_string(),
             }),
             rule_config: RuleConfig::default(),
+            detected_languages: None,
         }
     }
 
@@ -718,5 +723,128 @@ impl SentinelConfig {
             println!("{}", "🗑️  Configuración eliminada correctamente.".yellow());
         }
         Ok(())
+    }
+
+    /// Detect Java project configuration
+    ///
+    /// Detects Java projects by checking for:
+    /// - pom.xml (Maven)
+    /// - build.gradle or build.gradle.kts (Gradle)
+    /// - .java files in src directory
+    pub fn detect_java_project(path: &Path) -> bool {
+        // Check for Maven
+        if path.join("pom.xml").exists() {
+            return true;
+        }
+
+        // Check for Gradle
+        if path.join("build.gradle").exists() || path.join("build.gradle.kts").exists() {
+            return true;
+        }
+
+        // Check for src/main/java directory structure
+        if path.join("src").join("main").join("java").exists() {
+            return true;
+        }
+
+        // Check for .java files in src or src subdirectories
+        let src_path = path.join("src");
+        if src_path.exists() {
+            if let Ok(entries) = fs::read_dir(&src_path) {
+                for entry in entries.flatten() {
+                    if let Some(name) = entry.file_name().to_str() {
+                        // Check if it's a .java file directly in src
+                        if name.ends_with(".java") {
+                            return true;
+                        }
+                    }
+                    // Also check in subdirectories
+                    if let Ok(metadata) = entry.metadata() {
+                        if metadata.is_dir() {
+                            if let Ok(sub_entries) = fs::read_dir(entry.path()) {
+                                for sub_entry in sub_entries.flatten() {
+                                    if let Some(sub_name) = sub_entry.file_name().to_str() {
+                                        if sub_name.ends_with(".java") {
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Detect Rust project configuration
+    ///
+    /// Detects Rust projects by checking for:
+    /// - Cargo.toml
+    /// - Cargo.lock
+    /// - .rs files in src directory
+    pub fn detect_rust_project(path: &Path) -> bool {
+        // Check for Cargo.toml
+        if path.join("Cargo.toml").exists() {
+            return true;
+        }
+
+        // Check for Cargo.lock
+        if path.join("Cargo.lock").exists() {
+            return true;
+        }
+
+        // Check for src/*.rs files
+        if let Ok(entries) = fs::read_dir(path.join("src")) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.ends_with(".rs") {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Auto-detect supported languages in the project
+    ///
+    /// Scans the project directory for indicators of different language ecosystems
+    /// Returns a vector of detected language names
+    pub fn detect_project_languages(path: &Path) -> Vec<String> {
+        let mut detected = Vec::new();
+
+        // Detect Java
+        if Self::detect_java_project(path) {
+            detected.push("java".to_string());
+        }
+
+        // Detect Rust
+        if Self::detect_rust_project(path) {
+            detected.push("rust".to_string());
+        }
+
+        // Detect TypeScript/JavaScript (package.json)
+        if path.join("package.json").exists() {
+            detected.push("typescript".to_string());
+        }
+
+        // Detect Python (setup.py, pyproject.toml, requirements.txt)
+        if path.join("setup.py").exists()
+            || path.join("pyproject.toml").exists()
+            || path.join("requirements.txt").exists()
+        {
+            detected.push("python".to_string());
+        }
+
+        // Detect Go (go.mod, go.sum)
+        if path.join("go.mod").exists() || path.join("go.sum").exists() {
+            detected.push("go".to_string());
+        }
+
+        detected
     }
 }
