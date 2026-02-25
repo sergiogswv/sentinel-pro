@@ -1,12 +1,15 @@
 use crate::rules::{FrameworkDefinition, FrameworkRule, RuleViolation, RuleLevel};
+use crate::rules::custom::{CustomRule, load_custom_rules, execute_custom_rules};
 use crate::rules::static_analysis::NamingAnalyzerWithFramework;
 use crate::rules::languages;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub struct RuleEngine {
     pub framework_def: Option<FrameworkDefinition>,
     pub index_db: Option<std::sync::Arc<crate::index::IndexDb>>,
+    pub custom_rules: Vec<CustomRule>,
+    pub project_path: Option<PathBuf>,
 }
 
 impl RuleEngine {
@@ -14,12 +17,33 @@ impl RuleEngine {
         Self {
             framework_def: None,
             index_db: None,
+            custom_rules: Vec::new(),
+            project_path: None,
         }
+    }
+
+    pub fn with_project_path(mut self, project_path: impl Into<PathBuf>) -> Self {
+        self.project_path = Some(project_path.into());
+        self
     }
 
     pub fn with_index_db(mut self, db: std::sync::Arc<crate::index::IndexDb>) -> Self {
         self.index_db = Some(db);
         self
+    }
+
+    pub fn load_custom_rules(&mut self) -> anyhow::Result<()> {
+        if let Some(ref project_path) = self.project_path {
+            match load_custom_rules(project_path) {
+                Ok(rules) => {
+                    self.custom_rules = rules;
+                    Ok(())
+                }
+                Err(e) => Err(anyhow::anyhow!("Failed to load custom rules: {}", e)),
+            }
+        } else {
+            Ok(())
+        }
     }
 
     pub fn load_from_yaml(&mut self, yaml_path: &Path) -> anyhow::Result<()> {
@@ -95,6 +119,26 @@ impl RuleEngine {
                         value: None,
                     });
                 }
+            }
+        }
+
+        // 3. Custom Rules (if loaded)
+        if !self.custom_rules.is_empty() {
+            let custom_violations = execute_custom_rules(&self.custom_rules, content, _file_path);
+            // Convert custom rule violations to framework rule violations
+            for custom_violation in custom_violations {
+                violations.push(RuleViolation {
+                    rule_name: custom_violation.rule_name,
+                    message: custom_violation.message,
+                    level: match custom_violation.severity {
+                        crate::rules::custom::RuleSeverity::Info => RuleLevel::Info,
+                        crate::rules::custom::RuleSeverity::Warning => RuleLevel::Warning,
+                        crate::rules::custom::RuleSeverity::Error => RuleLevel::Error,
+                    },
+                    line: Some(custom_violation.line),
+                    symbol: None,
+                    value: None,
+                });
             }
         }
 
