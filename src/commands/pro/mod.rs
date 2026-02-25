@@ -208,15 +208,69 @@ fn handle_report(
 }
 
 fn handle_split(
-    _file: &str,
-    _agent_context: &AgentContext,
-    _orchestrator: &crate::agents::orchestrator::AgentOrchestrator,
+    file: &str,
+    agent_context: &AgentContext,
+    orchestrator: &crate::agents::orchestrator::AgentOrchestrator,
     output_mode: crate::commands::OutputMode,
-    _rt: &tokio::runtime::Runtime,
+    rt: &tokio::runtime::Runtime,
 ) {
-    // Placeholder
+    use crate::agents::base::{Task, TaskType};
+    use std::path::Path;
+
+    let file_path = Path::new(file);
+
+    // Validar que el archivo existe
+    if !file_path.exists() {
+        if output_mode != crate::commands::OutputMode::Quiet {
+            println!("❌ El archivo '{}' no existe.", file);
+        }
+        return;
+    }
+
+    // Leer el contenido del archivo
+    let file_content = match std::fs::read_to_string(file_path) {
+        Ok(content) => content,
+        Err(e) => {
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!("❌ Error al leer el archivo '{}': {}", file, e);
+            }
+            return;
+        }
+    };
+
     if output_mode != crate::commands::OutputMode::Quiet {
-        println!("Split handler stub");
+        println!("\n✂️  Analizando archivo para división...\n");
+    }
+
+    // Crear la tarea para el SplitterAgent
+    let task = Task {
+        id: uuid::Uuid::new_v4().to_string(),
+        description: format!("Dividir archivo en módulos cohesivos: {}", file),
+        task_type: TaskType::Refactor,
+        file_path: Some(file_path.to_path_buf()),
+        context: Some(file_content),
+    };
+
+    // Ejecutar el SplitterAgent a través del orquestador
+    let result = rt.block_on(orchestrator.execute_task("SplitterAgent", &task, agent_context));
+
+    match result {
+        Ok(res) => {
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!("{}", res.output);
+                if !res.files_modified.is_empty() {
+                    println!("\n📋 Archivos modificados:");
+                    for path in &res.files_modified {
+                        println!("   - {}", path.display());
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!("❌ Error ejecutando SplitterAgent: {}", e);
+            }
+        }
     }
 }
 
