@@ -109,7 +109,9 @@ pub fn consultar_ia(
         let tokens = (res.len() as u64 / 4) + (prompt_len as u64 / 4);
         let mut s = stats.lock().unwrap();
         s.total_tokens_used += tokens;
-        s.total_cost_usd += (tokens as f64 / 1000.0) * 0.01;
+        // Claude Sonnet 4.5: $3 input / $15 output per 1M tokens
+        // Using $9/1M as average (approx. 50% input + 50% output)
+        s.total_cost_usd += (tokens as f64 / 1_000_000.0) * 9.0;
     }
 
     resultado
