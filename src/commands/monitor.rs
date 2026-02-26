@@ -145,6 +145,90 @@ pub fn handle_status(project_root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn start_monitor_with_options(auto: bool) {
+    if auto {
+        println!("⚠️  La opción --auto es experimental y requiere ejecución con FeedbackLoop.");
+        println!("   Use: sentinel pro loop <file> para ejecutar el loop automático.");
+    }
+    start_monitor();
+}
+
+/// Agregar un archivo a la lista de exclusión temporal (para evitar re-procesamiento)
+pub fn exclude_file_from_monitor(project_root: &Path, file_path: &Path) -> anyhow::Result<()> {
+    let sentinel_dir = project_root.join(".sentinel");
+    std::fs::create_dir_all(&sentinel_dir)?;
+
+    let excluded_file = sentinel_dir.join("excluded_files.txt");
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let relative_path = file_path
+        .strip_prefix(project_root)
+        .unwrap_or(file_path)
+        .to_string_lossy();
+
+    let entry = format!("{}:{}\n", relative_path, timestamp);
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&excluded_file)?
+        .write_all(entry.as_bytes())?;
+
+    Ok(())
+}
+
+/// Verificar si un archivo está excluido temporalmente (últimos 60 segundos)
+pub fn is_file_excluded(project_root: &Path, file_path: &Path) -> bool {
+    let sentinel_dir = project_root.join(".sentinel");
+    let excluded_file = sentinel_dir.join("excluded_files.txt");
+
+    if !excluded_file.exists() {
+        return false;
+    }
+
+    let relative_path = file_path
+        .strip_prefix(project_root)
+        .unwrap_or(file_path)
+        .to_string_lossy();
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    if let Ok(content) = std::fs::read_to_string(&excluded_file) {
+        for line in content.lines() {
+            if let Some((path, timestamp_str)) = line.rsplit_once(':') {
+                if path == relative_path.as_ref() {
+                    if let Ok(timestamp) = timestamp_str.parse::<u64>() {
+                        if now - timestamp < 60 {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Limpiar entradas antiguas
+        let valid_lines: Vec<&str> = content
+            .lines()
+            .filter(|line| {
+                if let Some((_, ts_str)) = line.rsplit_once(':') {
+                    ts_str.parse::<u64>().ok().map_or(false, |ts| now - ts < 60)
+                } else {
+                    false
+                }
+            })
+            .collect();
+
+        let _ = std::fs::write(&excluded_file, valid_lines.join("\n"));
+    }
+
+    false
+}
+
 pub fn start_monitor() {
     // Mostrar banner al inicio
     ui::mostrar_banner();
@@ -299,11 +383,12 @@ pub fn start_monitor() {
 
     // Watcher
     let config_watcher = Arc::clone(&config);
+    let project_path_for_watcher = project_path.clone();
     let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
         if let Ok(event) = res {
             if let EventKind::Modify(_) = event.kind {
                 for path in event.paths {
-                    if !config_watcher.debe_ignorar(&path) {
+                    if !config_watcher.debe_ignorar(&path) && !is_file_excluded(&project_path_for_watcher, &path) {
                         let _ = tx.send(path);
                     }
                 }
@@ -316,14 +401,23 @@ pub fn start_monitor() {
         .watch(&project_path_watcher.join("src"), RecursiveMode::Recursive)
         .unwrap();
 
+    let pausa_leer = Arc::clone(&pausa_loop);
     let leer_respuesta = move || -> Option<String> {
         *esperando_input.lock().unwrap() = true;
+
+        // Pausar el monitor mientras se espera input del usuario
+        // para evitar que se acumulen eventos del watcher
+        *pausa_leer.lock().unwrap() = true;
+
         let res = stdin_rx
             .lock()
             .unwrap()
             .recv_timeout(std::time::Duration::from_secs(30))
             .ok();
+
         *esperando_input.lock().unwrap() = false;
+        *pausa_leer.lock().unwrap() = false;
+
         res
     };
 
@@ -339,21 +433,82 @@ pub fn start_monitor() {
     ui::mostrar_ayuda(Some(&config));
 
     let mut ultimo_cambio: HashMap<PathBuf, Instant> = HashMap::new();
-    while let Ok(changed_path) = rx.recv() {
-        thread::sleep(std::time::Duration::from_millis(500));
-        while rx.try_recv().is_ok() {}
+    let mut was_paused = false;
 
+    while let Ok(changed_path) = rx.recv() {
+        // Normalizar la path (resolver /../ y ./.)
+        let changed_path = match std::fs::canonicalize(&changed_path) {
+            Ok(canonical) => canonical,
+            Err(_) => changed_path, // Si no se puede canonicalizar, usar la original
+        };
+
+        thread::sleep(std::time::Duration::from_millis(500));
+
+        // Si estamos pausados, descartar este evento y todos acumulados
         if *pausa_loop.lock().unwrap() {
+            // Descartar todos los eventos acumulados
+            let mut dropped = 0;
+            while let Ok(_) = rx.try_recv() {
+                dropped += 1;
+            }
+            if std::env::var("VERBOSE").is_ok() {
+                println!("   [DEBUG] Pausa activa: descartado evento de {} + {} acumulados", changed_path.display(), dropped);
+            }
+            was_paused = true;
             continue;
+        }
+
+        // Si se acaba de reanudar después de pausa, descartar TODO incluyendo este evento
+        if was_paused {
+            if std::env::var("VERBOSE").is_ok() {
+                println!("   [DEBUG] Monitor reanudado: descartando evento rezagado de {}", changed_path.display());
+            }
+            // Limpiar toda la cola
+            while let Ok(_) = rx.try_recv() {}
+            was_paused = false;
+            continue;
+        }
+
+        // Limpiar eventos acumulados normales (debouncing)
+        let mut dropped_events = 0;
+        while let Ok(_) = rx.try_recv() {
+            dropped_events += 1;
+        }
+        if dropped_events > 0 && std::env::var("VERBOSE").is_ok() {
+            println!("   [DEBUG] {} eventos descartados de la cola (debounce)", dropped_events);
         }
 
         let ahora = Instant::now();
         if let Some(ultimo) = ultimo_cambio.get(&changed_path) {
             if ahora.duration_since(*ultimo) < std::time::Duration::from_secs(10) {
+                if std::env::var("VERBOSE").is_ok() {
+                    println!("   [DEBUG] {} ignorado (debounce activo)", changed_path.display());
+                }
                 continue;
             }
         }
+
+        // Verificación adicional: asegurar que el archivo realmente fue modificado recientemente
+        // Esto previene que el watcher reporte cambios incorrectos
+        if let Ok(metadata) = std::fs::metadata(&changed_path) {
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(elapsed) = modified.elapsed() {
+                    // Si el archivo no se modificó en los últimos 5 segundos, ignorarlo
+                    if elapsed.as_secs() > 5 {
+                        if std::env::var("VERBOSE").is_ok() {
+                            println!("   [DEBUG] {} ignorado (mtime antiguo: {}s)", changed_path.display(), elapsed.as_secs());
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+
         ultimo_cambio.insert(changed_path.clone(), ahora);
+
+        if std::env::var("VERBOSE").is_ok() {
+            println!("   [DEBUG] Procesando cambio en: {}", changed_path.display());
+        }
 
         let file_name = changed_path
             .file_name()

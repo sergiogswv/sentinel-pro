@@ -177,16 +177,102 @@ pub fn buscar_archivo_test(
         }
     };
 
+    // Debug: mostrar qué se está buscando (solo si RUST_LOG está activo)
+    if std::env::var("RUST_LOG").is_ok() || std::env::var("VERBOSE").is_ok() {
+        eprintln!("   🔎 Buscando tests para base_name='{}' con {} patrón(es)", base_name, test_patterns.len());
+    }
+
     // Intentar cada patrón
     for pattern in test_patterns {
         let path_str = pattern
             .replace("{name}", base_name)
-            .replace("{Name}", &capitalized);
+            .replace("{Name}", &capitalized)
+            .replace("{{name}}", base_name);  // Soportar {{name}} también
 
-        let test_path = project_path.join(&path_str);
+        // Checar si el patrón tiene ** (wildcard)
+        if path_str.contains("**") {
+            // Para patrones con **, buscar recursivamente
+            // Ej: "src/**/*.spec.ts" busca en cualquier subdirectorio de src/
+            if let Some(found) = find_test_recursive(&path_str, project_path, base_name) {
+                if std::env::var("RUST_LOG").is_ok() || std::env::var("VERBOSE").is_ok() {
+                    eprintln!("      └─ ¿{}? ✓ ENCONTRADO", found);
+                }
+                return Some(found);
+            }
+        } else {
+            // Patrón sin wildcards - búsqueda simple
+            let test_path = project_path.join(&path_str);
 
-        if test_path.exists() {
-            return Some(path_str);
+            if std::env::var("RUST_LOG").is_ok() || std::env::var("VERBOSE").is_ok() {
+                eprintln!("      └─ ¿{}? {}", path_str, if test_path.exists() { "✓ ENCONTRADO" } else { "✗" });
+            }
+
+            if test_path.exists() {
+                return Some(path_str);
+            }
+        }
+    }
+
+    if std::env::var("RUST_LOG").is_ok() || std::env::var("VERBOSE").is_ok() {
+        eprintln!("      ↳ Ningún test encontrado con los patrones configurados");
+    }
+
+    None
+}
+
+/// Busca archivos de test recursivamente usando patrones con ** wildcard
+/// Ejemplo: "src/**/*.spec.ts" busca cualquier .spec.ts en cualquier subdirectorio de src/
+fn find_test_recursive(pattern: &str, base_path: &Path, base_name: &str) -> Option<String> {
+    // Dividir patrón por ** para obtener el directorio base y la extensión
+    let parts: Vec<&str> = pattern.split("**").collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let start_dir = parts[0].trim_end_matches('/');
+    let suffix = if parts.len() > 1 {
+        parts[1].trim_start_matches('/')
+    } else {
+        ""
+    };
+
+    let root = base_path.join(start_dir);
+
+    // Buscar recursivamente
+    search_recursive(&root, suffix, base_name)
+}
+
+/// Búsqueda recursiva en el sistema de archivos
+fn search_recursive(dir: &Path, pattern_suffix: &str, base_name: &str) -> Option<String> {
+    if !dir.exists() {
+        return None;
+    }
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_name = path.file_name()?;
+            let file_name_str = file_name.to_string_lossy();
+
+            // Convertir patrón "*.spec.ts" a expresión simple
+            if pattern_suffix.starts_with('*') {
+                let suffix = pattern_suffix.trim_start_matches('*');
+                if file_name_str.ends_with(suffix) && file_name_str.contains(base_name) {
+                    // Retornar ruta relativa desde cwd
+                    if let Ok(cwd) = std::env::current_dir() {
+                        if let Ok(relative) = path.strip_prefix(&cwd) {
+                            return Some(relative.to_string_lossy().to_string());
+                        }
+                    }
+                    return Some(path.to_string_lossy().to_string());
+                }
+            }
+
+            if path.is_dir() {
+                if let Some(found) = search_recursive(&path, pattern_suffix, base_name) {
+                    return Some(found);
+                }
+            }
         }
     }
 

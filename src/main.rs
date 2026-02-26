@@ -29,7 +29,7 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Monitor { daemon, stop, status }) => {
+        Some(Commands::Monitor { daemon, stop, status, auto }) => {
             let project_root = crate::config::SentinelConfig::find_project_root()
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
 
@@ -49,7 +49,7 @@ fn main() {
                     std::process::exit(1);
                 }
             } else {
-                commands::monitor::start_monitor();
+                commands::monitor::start_monitor_with_options(auto);
             }
         }
         Some(Commands::Init { force }) => {
@@ -70,6 +70,11 @@ fn main() {
             let project_root = crate::config::SentinelConfig::find_project_root()
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
             commands::doctor::handle_doctor_command(&project_root);
+        }
+        Some(Commands::Stats { reset }) => {
+            let project_root = crate::config::SentinelConfig::find_project_root()
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+            commands::stats_cmd::handle_stats_command(&project_root, reset);
         }
         Some(Commands::Rules) => {
             let project_root = crate::config::SentinelConfig::find_project_root()

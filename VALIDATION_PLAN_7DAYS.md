@@ -78,9 +78,9 @@ sentinel pro --help
 sentinel pro check --help
 sentinel pro audit --help
 sentinel pro review --help
-sentinel pro refactor --help
-sentinel monitor --help
-sentinel ignore --help
+sentinel pro split --help
+sentinel pro test-all --help
+sentinel pro analyze --help
 ```
 
 **Registrar**:
@@ -298,10 +298,10 @@ sentinel monitor  # En primer plano
 ```
 
 **Observar**:
-- [ ] ¿Inicia sin errores?
-- [ ] ¿Detecta archivos a monitorear?
-- [ ] ¿Interfaz es clara?
-- [ ] Tiempo hasta "listo": ___ segundos
+- [x] ¿Inicia sin errores? Si
+- [x] ¿Detecta archivos a monitorear? NO
+- [x] ¿Interfaz es clara? SI
+- [x] Tiempo hasta "listo": 4 segundos
 
 ### Tarea 5.2: Hacer Cambios en Código
 
@@ -311,11 +311,11 @@ sentinel monitor  # En primer plano
 # 2. Guarda
 # 3. Observa qué hace monitor
 
-# Registra:
-# - ¿Detectó el cambio?
-# - ¿Cuánto tardó en reaccionar?
-# - ¿Qué análisis ejecutó?
-# - ¿Output fue útil?
+Registra:
+- ¿Detectó el cambio? SI
+- ¿Cuánto tardó en reaccionar? 1s o menos
+- ¿Qué análisis ejecutó? ninguno cuando no tiene test
+- ¿Output fue útil? si
 ```
 
 **Pruebas específicas**:
@@ -347,7 +347,7 @@ sentinel monitor --stop
 
 ---
 
-## ✂️ DÍA 6: `sentinel pro split` y `sentinel pro test`
+## ✂️ DÍA 6: `sentinel pro split` y `sentinel pro test-all`
 
 **Objetivo**: Validar herramientas especializadas
 
@@ -358,21 +358,21 @@ sentinel monitor --stop
 find src -name "*.ts" -o -name "*.js" | xargs wc -l | sort -rn | head -5
 
 # Aplica split al archivo más grande
-sentinel pro refactor --split src/path/to/big-file.ts
+sentinel pro split src/path/to/big-file.ts
 ```
 
 **Registrar**:
-- [ ] ¿Identificó archivos a extraer?
-- [ ] ¿Propuso división sensata?
-- [ ] Archivos generados: ___
-- [ ] ¿Necesitarías ajustes manuales? Sí / No
-- [ ] Utilidad percibida (1-5): ___
+- [x] ¿Identificó archivos a extraer? SI
+- [x] ¿Propuso división sensata? SI
+- [x] Archivos generados: 5
+- [x] ¿Necesitarías ajustes manuales? Sí
+- [x] Utilidad percibida (1-5): 3-4
 
 ### Tarea 6.2: Generar Tests
 
 ```bash
 # Selecciona una función sin tests
-sentinel pro test src/path/to/function.ts
+sentinel pro test-all src/path/to/function.ts
 
 # Valida los tests generados:
 # - ¿Syntax válida?

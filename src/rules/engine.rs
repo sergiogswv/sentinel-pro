@@ -10,6 +10,7 @@ pub struct RuleEngine {
     pub index_db: Option<std::sync::Arc<crate::index::IndexDb>>,
     pub custom_rules: Vec<CustomRule>,
     pub project_path: Option<PathBuf>,
+    pub rule_config: crate::config::RuleConfig,
 }
 
 impl RuleEngine {
@@ -19,7 +20,13 @@ impl RuleEngine {
             index_db: None,
             custom_rules: Vec::new(),
             project_path: None,
+            rule_config: crate::config::RuleConfig::default(),
         }
+    }
+
+    pub fn with_rule_config(mut self, config: crate::config::RuleConfig) -> Self {
+        self.rule_config = config;
+        self
     }
 
     pub fn with_project_path(mut self, project_path: impl Into<PathBuf>) -> Self {
@@ -73,6 +80,19 @@ impl RuleEngine {
                 violations.extend(naming_violations);
             }
         }
+
+        // Post-filter FUNCTION_TOO_LONG based on configured threshold
+        violations.retain(|v| {
+            if v.rule_name != "FUNCTION_TOO_LONG" {
+                return true;
+            }
+            // Keep only if line_count > threshold
+            if let Some(line_count) = v.value {
+                line_count > self.rule_config.function_length_threshold
+            } else {
+                true
+            }
+        });
 
         // --- Análisis de Proyecto Cruzado (SI hay DB disponible) ---
         if let Some(ref db) = self.index_db {

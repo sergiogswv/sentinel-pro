@@ -7,6 +7,7 @@ pub mod pro;
 pub mod rules;
 pub mod precommit;
 pub mod github_actions;
+pub mod stats_cmd;
 
 use clap::{Parser, Subcommand};
 
@@ -59,6 +60,9 @@ pub enum Commands {
         /// Mostrar estado del daemon
         #[arg(long)]
         status: bool,
+        /// Ejecutar FeedbackLoop automático en archivos modificados (skip confirmaciones)
+        #[arg(long)]
+        auto: bool,
     },
     /// Gestiona la lista de hallazgos ignorados (falsos positivos)
     Ignore {
@@ -96,6 +100,12 @@ pub enum Commands {
     },
     /// Diagnóstico del entorno (config, API key, índice, lenguajes)
     Doctor,
+    /// Ver estadísticas de tokens y costos (día, semana, mes, total)
+    Stats {
+        /// Reset estadísticas (day, week, month, all)
+        #[arg(long)]
+        reset: Option<String>,
+    },
     /// Lista las reglas activas con umbrales configurables
     Rules,
     /// Gestión de hooks pre-commit para Git
@@ -188,6 +198,17 @@ pub enum ProCommands {
         /// Llamadas LLM en paralelo (default: 3, rango 1-10)
         #[arg(long, default_value = "3")]
         concurrency: usize,
+    },
+    /// Loop automático de análisis, fixes y validación
+    Loop {
+        /// Archivo a procesar en el loop
+        file: std::path::PathBuf,
+        /// Máximo de iteraciones (default: 3)
+        #[arg(long, default_value = "3")]
+        max_iterations: u8,
+        /// Saltar confirmaciones (peligroso, solo para scripts)
+        #[arg(long)]
+        auto: bool,
     },
     /// Gestión de modelos de ML Local
     Ml {

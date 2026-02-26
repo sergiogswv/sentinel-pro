@@ -178,6 +178,9 @@ pub fn handle_pro_command(subcommand: ProCommands, quiet: bool, verbose: bool) {
         ProCommands::Workflow { name, file } => {
             handle_workflow(&name, file.as_deref(), &agent_context, &orchestrator, output_mode, &rt);
         }
+        ProCommands::Loop { file, max_iterations, auto } => {
+            handle_loop(&file, max_iterations, auto, &agent_context, &orchestrator, output_mode, &rt);
+        }
     }
 }
 
@@ -336,6 +339,68 @@ fn handle_workflow(
     // Placeholder
     if output_mode != crate::commands::OutputMode::Quiet {
         println!("Workflow handler stub");
+    }
+}
+
+fn handle_loop(
+    file: &std::path::PathBuf,
+    max_iterations: u8,
+    _auto: bool,
+    agent_context: &AgentContext,
+    orchestrator: &crate::agents::orchestrator::AgentOrchestrator,
+    output_mode: crate::commands::OutputMode,
+    rt: &tokio::runtime::Runtime,
+) {
+    use crate::agents::FeedbackLoop;
+
+    if output_mode != crate::commands::OutputMode::Quiet {
+        println!(
+            "\n{} {}",
+            "🔄 FeedbackLoop Automático".cyan().bold(),
+            format!("(máx {} iteraciones)", max_iterations).dimmed()
+        );
+    }
+
+    let feedback_loop = FeedbackLoop::new(
+        orchestrator,
+        agent_context,
+        max_iterations,
+    );
+
+    match rt.block_on(feedback_loop.run(file)) {
+        Ok(result) => {
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!("\n✅ Loop completado");
+                println!(
+                    "   Iteraciones: {} | Fixes: {} | Issues arreglados: {} | Saltados: {}",
+                    result.iterations, result.fixes_applied, result.issues_fixed, result.issues_skipped
+                );
+                println!(
+                    "   Tiempo: {}s | ROI: {} fixes en {}s",
+                    result.total_time_secs,
+                    result.fixes_applied,
+                    result.total_time_secs
+                );
+
+                // Actualizar stats
+                if let Ok(mut stats) = agent_context.stats.lock() {
+                    stats.sugerencias_aplicadas += result.fixes_applied;
+                    stats.tiempo_estimado_ahorrado_mins += (result.fixes_applied as u32) * 20;
+                    stats.guardar(&agent_context.project_root);
+                }
+            }
+
+            // Excluir el archivo del monitor durante 60 segundos para evitar re-procesamiento
+            let _ = crate::commands::monitor::exclude_file_from_monitor(
+                &agent_context.project_root,
+                file,
+            );
+        }
+        Err(e) => {
+            if output_mode != crate::commands::OutputMode::Quiet {
+                println!("❌ Error en FeedbackLoop: {}", e);
+            }
+        }
     }
 }
 

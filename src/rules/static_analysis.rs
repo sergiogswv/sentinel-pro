@@ -137,11 +137,19 @@ impl StaticAnalyzer for UnusedImportsAnalyzer {
 }
 
 /// Analizador de complejidad ciclomática
-pub struct ComplexityAnalyzer;
+pub struct ComplexityAnalyzer {
+    pub function_length_threshold: usize,
+}
 
 impl ComplexityAnalyzer {
     pub fn new() -> Self {
-        Self
+        Self {
+            function_length_threshold: 50, // default
+        }
+    }
+
+    pub fn with_config(function_length_threshold: usize) -> Self {
+        Self { function_length_threshold }
     }
 }
 
@@ -230,13 +238,13 @@ impl StaticAnalyzer for ComplexityAnalyzer {
                 let start_line = node.range().start_point.row;
                 let end_line = node.range().end_point.row;
                 let line_count = end_line.saturating_sub(start_line);
-                // NOTE: 10 is the absolute generation floor for function length.
-                if line_count > 10 {
+                // Use configured threshold instead of hardcoded value
+                if line_count > self.function_length_threshold {
                     violations.push(RuleViolation {
                         rule_name: "FUNCTION_TOO_LONG".to_string(),
                         message: format!(
-                            "Función de {} líneas (máximo recomendado: 50). Considera dividirla en funciones más pequeñas.",
-                            line_count
+                            "Función de {} líneas (máximo recomendado: {}). Considera dividirla en funciones más pequeñas.",
+                            line_count, self.function_length_threshold
                         ),
                         level: RuleLevel::Warning,
                         line: Some(start_line + 1),
