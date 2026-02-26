@@ -2,17 +2,8 @@ use std::path::Path;
 use std::fs;
 use std::collections::BTreeMap;
 use chrono::{Local, Datelike};
-use serde::{Deserialize, Serialize};
 use colored::*;
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct HistoryEntry {
-    pub timestamp: String,
-    pub total_tokens: u64,
-    pub total_cost_usd: f64,
-    pub sugerencias_aplicadas: u32,
-    pub bugs_evitados: u32,
-}
+use crate::stats::HistoryEntry;
 
 pub fn handle_stats_command(project_root: &Path, reset: Option<String>) {
     let stats_path = project_root.join(".sentinel_stats.json");
@@ -32,6 +23,9 @@ pub fn handle_stats_command(project_root: &Path, reset: Option<String>) {
     let stats_content = fs::read_to_string(&stats_path).unwrap_or_default();
     let stats: crate::stats::SentinelStats =
         serde_json::from_str(&stats_content).unwrap_or_default();
+
+    // Actualizar historial diario con los stats actuales
+    let _ = stats.guardar(project_root);
 
     println!("\n{}", "📊 ESTADÍSTICAS DE SENTINEL".cyan().bold());
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");

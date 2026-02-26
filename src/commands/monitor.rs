@@ -708,6 +708,12 @@ pub fn start_monitor() {
                 }
             }
         }
+
+        // Guardar stats después de procesar cada archivo (para registrar historial diario)
+        {
+            let stats_snapshot = stats.lock().unwrap().clone();
+            stats_snapshot.guardar(&project_path);
+        }
     }
 }
 
