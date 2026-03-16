@@ -50,12 +50,25 @@ impl super::AiProvider for AnthropicProvider {
         }
 
         let body: serde_json::Value = serde_json::from_str(&body_text)?;
-        body["content"][0]["text"]
-            .as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| {
-                anyhow::anyhow!("Estructura de Anthropic inesperada. Body: {}", body_text)
-            })
+        let mut extracted_text = String::new();
+        if let Some(contents) = body["content"].as_array() {
+            for content in contents {
+                if content["type"] == "text" {
+                    if let Some(t) = content["text"].as_str() {
+                        extracted_text.push_str(t);
+                    }
+                } else if content["text"].is_string() {
+                    // Fallback para content blocks que traen text directo sin type explícito
+                    extracted_text.push_str(content["text"].as_str().unwrap());
+                }
+            }
+        }
+
+        if extracted_text.is_empty() {
+            Err(anyhow::anyhow!("Estructura de Anthropic inesperada. Body: {}", body_text))
+        } else {
+            Ok(extracted_text)
+        }
     }
 
     fn embed(&self, _client: &Client, _texts: Vec<String>, _model_name: &str) -> Result<Vec<Vec<f32>>> {

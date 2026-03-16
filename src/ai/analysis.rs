@@ -59,6 +59,18 @@ pub fn analizar_arquitectura(
     // DRY: Extraer valores repetidos para evitar duplicación en el prompt
     let framework = &config.framework;
 
+    let skip_imports_str = if config.ai_analysis.skip_import_validation {
+        "- IGNORA las validaciones de estructuración e importaciones (serán procesadas por pre-commits estáticos)."
+    } else {
+        "- Evalúa importaciones y estructura del proyecto."
+    };
+
+    let focus_logic_str = if config.ai_analysis.focus_on_logic_quality {
+        "- ENFÓCATE exclusivamente en la calidad lógica y semántica del archivo actual."
+    } else {
+        ""
+    };
+
     let prompt = format!(
         "Actúa como un Arquitecto de Software experto en {}.\n\n\
         CONTEXTO DEL PROYECTO:\n\
@@ -69,6 +81,9 @@ pub fn analizar_arquitectura(
         ANÁLISIS REQUERIDO:\n\
         Analiza el código siguiente basándote ESTRICTAMENTE en las reglas de arquitectura listadas arriba.\n\
         Considera las mejores prácticas específicas de {}.\n\n\
+        DIRECTRIZ OPERATIVA:\n\
+        {}\n\
+        {}\n\n\
         PRINCIPIOS A EVALUAR:\n\
         - DRY (Don't Repeat Yourself): Detecta código duplicado, lógica repetitiva o patrones que puedan extraerse en funciones/módulos reutilizables\n\
         - SOLID: Evalúa responsabilidad única, abierto/cerrado, sustitución de Liskov, segregación de interfaces, inversión de dependencias\n\
@@ -83,6 +98,8 @@ pub fn analizar_arquitectura(
         file_name,
         reglas_str,
         framework,
+        skip_imports_str,
+        focus_logic_str,
         lenguaje_bloque,
         codigo
     );

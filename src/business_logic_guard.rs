@@ -8,7 +8,7 @@ pub fn get_git_previous_content(file_path: &Path, project_root: &Path) -> Option
     let rel_str = rel_path.to_string_lossy();
 
     let output = Command::new("git")
-        .args(["show", &format!("HEAD:{}", rel_str)])
+        .args(["--no-pager", "show", &format!("HEAD:{}", rel_str)])
         .current_dir(project_root)
         .output()
         .ok()?;

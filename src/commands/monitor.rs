@@ -145,12 +145,12 @@ pub fn handle_status(project_root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn start_monitor_with_options(auto: bool) {
+pub fn start_monitor_with_options(auto: bool, project: Option<String>) {
     if auto {
         println!("⚠️  La opción --auto es experimental y requiere ejecución con FeedbackLoop.");
         println!("   Use: sentinel pro loop <file> para ejecutar el loop automático.");
     }
-    start_monitor();
+    start_monitor(project);
 }
 
 /// Agregar un archivo a la lista de exclusión temporal (para evitar re-procesamiento)
@@ -229,14 +229,38 @@ pub fn is_file_excluded(project_root: &Path, file_path: &Path) -> bool {
     false
 }
 
-pub fn start_monitor() {
+pub fn start_monitor(project: Option<String>) {
     // Mostrar banner al inicio
     ui::mostrar_banner();
 
-    let project_path = ui::seleccionar_proyecto();
-    if !project_path.exists() {
-        std::process::exit(1);
-    }
+    let project_path = if let Some(project_name) = project {
+        // Si se proporciona proyecto vía --project, usarlo directamente
+        let mut path = std::path::PathBuf::from(&project_name);
+
+        // Si es ".", canonicalizarlo al directorio actual
+        if path.as_os_str() == "." {
+            path = match std::env::current_dir() {
+                Ok(cwd) => cwd,
+                Err(e) => {
+                    eprintln!("❌ Error obteniendo directorio actual: {}", e);
+                    std::process::exit(1);
+                }
+            };
+        }
+
+        if !path.exists() {
+            eprintln!("❌ El proyecto no existe: {}", project_name);
+            std::process::exit(1);
+        }
+        path
+    } else {
+        // Si no, pedir interactivamente
+        let path = ui::seleccionar_proyecto();
+        if !path.exists() {
+            std::process::exit(1);
+        }
+        path
+    };
 
     // Guardar como proyecto activo
     let _ = SentinelConfig::save_active_project(&project_path);
@@ -421,6 +445,44 @@ pub fn start_monitor() {
         res
     };
 
+    let remote_prompt = |prompt_text: &str| -> Option<String> {
+        let prompt_id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        crate::agent_interaction::MANAGER.register(prompt_id.clone(), tx);
+
+        // Reportar el prompt al Cerebro
+        let agent_config = crate::agent_config::AgentConfig::from_env();
+        let mut payload = std::collections::HashMap::new();
+        payload.insert("message".to_string(), serde_json::Value::String(prompt_text.to_string()));
+        payload.insert("prompt_id".to_string(), serde_json::Value::String(prompt_id.clone()));
+        payload.insert("interaction_type".to_string(), serde_json::Value::String("boolean".to_string())); // s/n
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let _ = rt.block_on(crate::agent_reporter::report_event(
+            &agent_config,
+            "interaction_required",
+            "info",
+            payload
+        ));
+
+        println!("⏳ Esperando respuesta remota (ID: {})...", prompt_id);
+
+        // Esperar la respuesta (con timeout de 60 segundos)
+        match rt.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(60), rx).await
+        }) {
+            Ok(Ok(answer)) => Some(answer),
+            _ => {
+                println!("⚠️ Timeout o error esperando respuesta remota.");
+                None
+            }
+        }
+    };
+
     println!(
         "\n{} {}",
         format!("🛡️ Sentinel v{} activo en:", config::SENTINEL_VERSION)
@@ -436,6 +498,7 @@ pub fn start_monitor() {
     let mut was_paused = false;
 
     while let Ok(changed_path) = rx.recv() {
+        println!("👀 CAMBIO DETECTADO: {}", changed_path.display());
         // Normalizar la path (resolver /../ y ./.)
         let changed_path = match std::fs::canonicalize(&changed_path) {
             Ok(canonical) => canonical,
@@ -517,6 +580,26 @@ pub fn start_monitor() {
             .unwrap()
             .to_string();
 
+        // --- Reportar al Cerebro (Modo Agente) ---
+        let agent_config = crate::agent_config::AgentConfig::from_env();
+        if agent_config.report_enabled {
+            let mut payload = std::collections::HashMap::new();
+            payload.insert("file".to_string(), serde_json::Value::String(changed_path.to_string_lossy().to_string()));
+            payload.insert("message".to_string(), serde_json::Value::String(format!("Archivo modificado: {}", file_name)));
+            
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            
+            let _ = rt.block_on(crate::agent_reporter::report_event(
+                &agent_config,
+                "file_change",
+                "warning", // Usamos warning para disparar Architect en Cerebro
+                payload
+            ));
+        }
+
         // --- Actualizar Índice de Símbolos (SQLite) ---
         let _ = index_builder.index_file(&changed_path, &project_path);
 
@@ -575,10 +658,9 @@ pub fn start_monitor() {
                 "{}",
                 "⚠️  No se encontraron tests para este archivo.".yellow()
             );
-            print!("🔍 ¿Deseas que revise el código de todas formas? (s/n) [30s timeout]: ");
-            io::stdout().flush().unwrap();
-
-            match leer_respuesta() {
+            
+            let query_text = format!("Sentinel: No hay tests para {}. ¿Deseas que revise el código de todas formas? (s/n)", file_name);
+            match remote_prompt(&query_text) {
                 Some(respuesta) if respuesta == "s" => {
                     if let Ok(codigo) = std::fs::read_to_string(&changed_path) {
                         // Validar Reglas Pro (Estáticas)
@@ -596,8 +678,7 @@ pub fn start_monitor() {
                             }
                         }
 
-                        let spinner_ai =
-                            ui::crear_progreso("   🤖 Analizando arquitectura con IA...");
+                        let spinner_ai = ui::crear_progreso("   🤖 Analizando arquitectura con IA...");
                         let resultado_analisis = ai::analizar_arquitectura(
                             &codigo,
                             &file_name,
@@ -607,6 +688,23 @@ pub fn start_monitor() {
                             &changed_path,
                         );
                         spinner_ai.finish_and_clear();
+
+                        // --- Reportar Hallazgos al Cerebro ---
+                        if let Ok(aprobado) = &resultado_analisis {
+                            let agent_config = crate::agent_config::AgentConfig::from_env();
+                            let mut payload = std::collections::HashMap::new();
+                            payload.insert("file".to_string(), serde_json::Value::String(changed_path.to_string_lossy().to_string()));
+                            payload.insert("status".to_string(), serde_json::Value::String(if *aprobado { "approved".to_string() } else { "rejected".to_string() }));
+                            payload.insert("message".to_string(), serde_json::Value::String(format!("Análisis completado para {}. Status: {}", file_name, if *aprobado { "SEGURO" } else { "CRÍTICO" })));
+                            
+                            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+                            let _ = rt.block_on(crate::agent_reporter::report_event(
+                                &agent_config,
+                                "analysis_completed",
+                                if *aprobado { "info" } else { "error" },
+                                payload
+                            ));
+                        }
 
                         match resultado_analisis {
                             Ok(true) => {
@@ -634,77 +732,72 @@ pub fn start_monitor() {
 
         if let Some(test_path) = test_rel_path {
             println!("\n🔔 CAMBIO EN: {}", file_name.cyan().bold());
+            
+            let query_text = format!("Sentinel: Se encontró el test '{}' para {}. ¿Procedo con validación y ejecución? (s/n)", test_path, file_name);
+            match remote_prompt(&query_text) {
+                Some(respuesta) if respuesta == "s" => {
+                    if let Ok(codigo) = std::fs::read_to_string(&changed_path) {
+                        // Validar Reglas Pro (Estáticas)
+                        let spinner = ui::crear_progreso("   🔍 Validando reglas estáticas...");
+                        let violaciones = rule_engine.validate_file(&changed_path, &codigo);
+                        spinner.finish_and_clear();
 
-            if let Ok(codigo) = std::fs::read_to_string(&changed_path) {
-                // Validar Reglas Pro (Estáticas)
-                let spinner = ui::crear_progreso("   🔍 Validando reglas estáticas...");
-                let violaciones = rule_engine.validate_file(&changed_path, &codigo);
-                spinner.finish_and_clear();
-
-                if !violaciones.is_empty() {
-                    println!(
-                        "\n🚩 {}",
-                        "VIOLACIONES DE ARQUITECTURA DETECTADAS:".bold().red()
-                    );
-                    for v in violaciones {
-                        let label = match v.level {
-                            crate::rules::RuleLevel::Error => "ERROR".red().bold(),
-                            crate::rules::RuleLevel::Warning => "WARN".yellow().bold(),
-                            crate::rules::RuleLevel::Info => "INFO".blue().bold(),
-                        };
-                        println!("   • [{}][{}]: {}", label, v.rule_name.yellow(), v.message);
-                    }
-                }
-
-                let spinner_ai = ui::crear_progreso("   🤖 Analizando arquitectura con IA...");
-                let resultado_analisis = ai::analizar_arquitectura(
-                    &codigo,
-                    &file_name,
-                    Arc::clone(&stats),
-                    &config,
-                    &project_path,
-                    &changed_path,
-                );
-                spinner_ai.finish_and_clear();
-
-                match resultado_analisis {
-                    Ok(true) => {
-                        if test_runner::ejecutar_tests(&test_path, &project_path).is_ok() {
-                            let _ = docs::actualizar_documentacion(
-                                &codigo,
-                                &changed_path,
-                                &config,
-                                Arc::clone(&stats),
-                                &project_path,
-                            );
-                            let msg = git::generar_mensaje_commit(
-                                &codigo,
-                                &file_name,
-                                &config,
-                                Arc::clone(&stats),
-                                &project_path,
-                            );
-                            println!("\n🚀 Mensaje: {}", msg.bright_cyan().bold());
-                            print!("📝 ¿Commit? (s/n): ");
-                            io::stdout().flush().unwrap();
-                            if let Some(r) = leer_respuesta() {
-                                git::preguntar_commit(&project_path, &msg, &r);
-                            }
-                        } else {
-                            print!("\n🔍 ¿Ayuda con test? (s/n): ");
-                            io::stdout().flush().unwrap();
-                            if leer_respuesta().as_deref() == Some("s") {
-                                let _ = test_runner::pedir_ayuda_test(
-                                    &codigo,
-                                    &test_path,
-                                    &config,
-                                    Arc::clone(&stats),
-                                    &project_path,
-                                );
+                        if !violaciones.is_empty() {
+                            println!("\n🚩 {}", "VIOLACIONES DE ARQUITECTURA DETECTADAS:".bold().red());
+                            for v in violaciones {
+                                let label = match v.level {
+                                    crate::rules::RuleLevel::Error => "ERROR".red().bold(),
+                                    crate::rules::RuleLevel::Warning => "WARN".yellow().bold(),
+                                    crate::rules::RuleLevel::Info => "INFO".blue().bold(),
+                                };
+                                println!("   • [{}][{}]: {}", label, v.rule_name.yellow(), v.message);
                             }
                         }
+
+                        let spinner_ai = ui::crear_progreso("   🤖 Analizando arquitectura con IA...");
+                        let resultado_analisis = ai::analizar_arquitectura(&codigo, &file_name, Arc::clone(&stats), &config, &project_path, &changed_path);
+                        spinner_ai.finish_and_clear();
+
+                        // --- Reportar Hallazgos al Cerebro ---
+                        if let Ok(aprobado) = &resultado_analisis {
+                            let agent_config = crate::agent_config::AgentConfig::from_env();
+                            let mut payload = std::collections::HashMap::new();
+                            payload.insert("file".to_string(), serde_json::Value::String(changed_path.to_string_lossy().to_string()));
+                            payload.insert("status".to_string(), serde_json::Value::String(if *aprobado { "approved".to_string() } else { "rejected".to_string() }));
+                            payload.insert("message".to_string(), serde_json::Value::String(format!("Análisis completado para {}. Status: {}", file_name, if *aprobado { "SEGURO" } else { "CRÍTICO" })));
+                            
+                            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+                            let _ = rt.block_on(crate::agent_reporter::report_event(
+                                &agent_config,
+                                "analysis_completed",
+                                if *aprobado { "info" } else { "error" },
+                                payload
+                            ));
+                        }
+
+                        match resultado_analisis {
+                            Ok(true) => {
+                                if test_runner::ejecutar_tests(&test_path, &project_path).is_ok() {
+                                    let _ = docs::actualizar_documentacion(&codigo, &changed_path, &config, Arc::clone(&stats), &project_path);
+                                    let msg = git::generar_mensaje_commit(&codigo, &file_name, &config, Arc::clone(&stats), &project_path);
+                                    println!("\n🚀 Mensaje: {}", msg.bright_cyan().bold());
+                                    let query_commit = format!("Sentinel: Tests pasaron para {}. ¿Hago el commit con el mensaje '{}'? (s/n)", file_name, msg);
+                                    if let Some(r) = remote_prompt(&query_commit) {
+                                        git::preguntar_commit(&project_path, &msg, &r);
+                                    }
+                                } else {
+                                    let query_help = format!("Sentinel: Tests fallaron para {}. ¿Deseas ayuda de la IA para corregirlo? (s/n)", file_name);
+                                    if remote_prompt(&query_help).as_deref() == Some("s") {
+                                        let _ = test_runner::pedir_ayuda_test(&codigo, &test_path, &config, Arc::clone(&stats), &project_path);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
                     }
-                    _ => {}
+                }
+                _ => {
+                    println!("   ⏭️  Revisión omitida por el usuario.");
                 }
             }
         }
