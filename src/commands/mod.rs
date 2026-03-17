@@ -63,6 +63,9 @@ pub enum Commands {
         /// Ejecutar FeedbackLoop automático en archivos modificados (skip confirmaciones)
         #[arg(long)]
         auto: bool,
+        /// Proyecto a monitorear (opcional, si no se especifica se pide interactivamente)
+        #[arg(long)]
+        project: Option<String>,
     },
     /// Gestiona la lista de hallazgos ignorados (falsos positivos)
     Ignore {
@@ -120,12 +123,13 @@ pub enum Commands {
         #[arg(long)]
         status: bool,
     },
-    /// Gestión de workflows de GitHub Actions
     GitHubActions {
         /// Tipo de workflow a instalar
         #[arg(value_parser = ["analysis", "tests", "security", "all"], default_value = "all")]
         workflow_type: String,
     },
+    /// Inicia el modo agente HTTP para integración con Cerebro
+    Serve,
     /// Comandos avanzados de la versión Pro
     Pro {
         #[command(subcommand)]

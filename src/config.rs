@@ -86,6 +86,23 @@ impl Default for RuleConfig {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AiAnalysisConfig {
+    #[serde(default)]
+    pub skip_import_validation: bool,
+    #[serde(default = "default_true")]
+    pub focus_on_logic_quality: bool,
+}
+
+impl Default for AiAnalysisConfig {
+    fn default() -> Self {
+        Self {
+            skip_import_validation: false,
+            focus_on_logic_quality: true,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LocalLlmConfig {
     pub provider: String,
     pub model_path: String,
@@ -141,6 +158,8 @@ pub struct SentinelConfig {
     pub ml: Option<MlConfig>,
     #[serde(default)]
     pub rule_config: RuleConfig,
+    #[serde(default)]
+    pub ai_analysis: AiAnalysisConfig,
 
     // --- Language Detection (Capa 3) ---
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -207,6 +226,7 @@ impl SentinelConfig {
                 bug_predictor_model: "bug-predictor-v1".to_string(),
             }),
             rule_config: RuleConfig::default(),
+            ai_analysis: AiAnalysisConfig::default(),
             detected_languages: None,
         }
     }

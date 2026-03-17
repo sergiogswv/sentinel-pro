@@ -3,6 +3,7 @@
 use colored::Colorize;
 use std::fs;
 use std::path::Path;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 /// Pre-commit hook template (embedded in binary)

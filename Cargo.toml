@@ -29,6 +29,8 @@ anyhow = "1.0"
 colored = "2.0"
 toml = "0.8"
 tokio = { version = "1.0", features = ["full"] }
+axum = "0.7"
+dotenvy = "0.15"
 clap = { version = "4.5.59", features = ["derive"] }
 indicatif = "0.18.4"
 dialoguer = "0.11"
@@ -42,7 +44,7 @@ tree-sitter-java = "0.23.2"
 tree-sitter-rust = "0.21.2"
 uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
 async-trait = "0.1.89"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 sha2 = "0.10"
 

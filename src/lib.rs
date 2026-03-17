@@ -19,5 +19,14 @@ pub mod business_logic_guard;
 pub mod ml;
 pub mod rules;
 pub mod stats;
+pub mod telemetry;
 pub mod tests;
 pub mod ui;
+pub mod update;
+
+// Agent integration
+pub mod agent_config;
+pub mod agent_models;
+pub mod agent_reporter;
+pub mod agent_server;
+pub mod agent_interaction;
