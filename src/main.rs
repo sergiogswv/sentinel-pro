@@ -7,29 +7,19 @@
 use clap::Parser;
 use commands::{Cli, Commands};
 
-// Módulos
-pub mod agents;
-pub mod ai;
-pub mod commands;
-pub mod config;
-pub mod docs;
-pub mod files;
-pub mod git;
-pub mod index;
-pub mod business_logic_guard;
-pub mod ml;
-pub mod rules;
-pub mod stats;
-pub mod tests;
-pub mod ui;
-pub mod telemetry;
-pub mod update;
+use sentinel_pro::*;
 
 fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Monitor { daemon, stop, status, auto }) => {
+        Some(Commands::Monitor {
+            daemon,
+            stop,
+            status,
+            auto,
+            project,
+        }) => {
             let project_root = crate::config::SentinelConfig::find_project_root()
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
 
@@ -49,7 +39,7 @@ fn main() {
                     std::process::exit(1);
                 }
             } else {
-                commands::monitor::start_monitor_with_options(auto);
+                commands::monitor::start_monitor_with_options(auto, project);
             }
         }
         Some(Commands::Init { force }) => {
@@ -57,7 +47,14 @@ fn main() {
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
             commands::init::handle_init_command(&project_root, force);
         }
-        Some(Commands::Ignore { rule, file, symbol, list, clear, show_file }) => {
+        Some(Commands::Ignore {
+            rule,
+            file,
+            symbol,
+            list,
+            clear,
+            show_file,
+        }) => {
             commands::ignore::handle_ignore_command(rule, file, symbol, list, clear, show_file);
         }
         Some(Commands::Index { rebuild, check }) => {
@@ -81,7 +78,11 @@ fn main() {
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
             commands::rules::handle_rules_command(&project_root);
         }
-        Some(Commands::PreCommit { install, uninstall, status }) => {
+        Some(Commands::PreCommit {
+            install,
+            uninstall,
+            status,
+        }) => {
             let project_root = crate::config::SentinelConfig::find_project_root()
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
 
@@ -111,9 +112,30 @@ fn main() {
 
             commands::github_actions::handle_github_actions_command(&project_root, action);
         }
+        Some(Commands::Serve) => {
+            let config = agent_config::AgentConfig::from_env();
+            println!("╔════════════════════════════════════╗");
+            println!("║   Sentinel v5.0.0 — Modo Agente   ║");
+            println!("║   Conectado al Cerebro             ║");
+            println!("╚════════════════════════════════════╝");
+            println!();
+            println!("   Cerebro URL : {}", config.cerebro_url);
+            println!("   Puerto      : {}", config.port);
+            println!();
+
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            
+            if let Err(e) = rt.block_on(agent_server::start_server(config)) {
+                eprintln!("❌ Error en el servidor del agente: {}", e);
+                std::process::exit(1);
+            }
+        }
         None => {
             // Comportamiento por defecto (legacy)
-            commands::monitor::start_monitor();
+            commands::monitor::start_monitor(None);
         }
     }
 }
