@@ -42,7 +42,7 @@ pub fn analizar_arquitectura(
     config: &SentinelConfig,
     project_path: &Path,
     file_path: &Path,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<(bool, String)> {
     // Convertimos el Vec<String> de reglas en una lista numerada para el prompt
     let reglas_str = config
         .architecture_rules
@@ -139,5 +139,5 @@ pub fn analizar_arquitectura(
     let consejo = eliminar_bloques_codigo(&respuesta);
     println!("\n✨ CONSEJO DE CLAUDE:\n{}", consejo);
 
-    Ok(!es_critico)
+    Ok((!es_critico, consejo))
 }

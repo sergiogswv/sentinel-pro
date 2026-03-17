@@ -2,7 +2,7 @@ use std::path::Path;
 use crate::config::SentinelConfig;
 use crate::rules::engine::RuleEngine;
 use crate::stats::SentinelStats;
-use crate::{ai, config, docs, files, git, index, tests as test_runner, ui, business_logic_guard};
+use crate::{ai, config, docs, files, git, index, ui, business_logic_guard};
 use colored::*;
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use std::collections::HashMap;
@@ -14,6 +14,21 @@ use std::time::Instant;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub static STOP_SIGNAL: AtomicBool = AtomicBool::new(false);
+
+fn report_sync(event_type: &str, severity: &str, mut payload: HashMap<String, serde_json::Value>) {
+    let agent_config = crate::agent_config::AgentConfig::from_env();
+    if !agent_config.report_enabled { return; }
+    
+    // Inyectar timestamp si no existe
+    if !payload.contains_key("timestamp") {
+        payload.insert("timestamp".to_string(), serde_json::Value::Number(serde_json::Number::from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())));
+    }
+
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().ok();
+    if let Some(r) = rt {
+        let _ = r.block_on(crate::agent_reporter::report_event(&agent_config, event_type, severity, payload));
+    }
+}
 
 pub(crate) fn write_pid_file(pid_path: &Path, pid: u32) -> anyhow::Result<()> {
     if let Some(parent) = pid_path.parent() {
@@ -294,6 +309,27 @@ pub fn start_monitor(project: Option<String>) {
     spinner_index.finish_and_clear();
     println!("   ✅ Proyecto indexado en SQLite.");
 
+    // Reportar evento ready al Cerebro cuando Sentinel está completamente inicializado
+    let agent_config = crate::agent_config::AgentConfig::from_env();
+    if agent_config.report_enabled {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok();
+        if let Some(r) = rt {
+            let _ = r.block_on(crate::agent_reporter::report_event(
+                &agent_config,
+                "sentinel_ready",
+                "info",
+                HashMap::from([
+                    ("message".to_string(), serde_json::Value::String(format!("Sentinel v{} listo para monitorear", config::SENTINEL_VERSION))),
+                    ("version".to_string(), serde_json::Value::String(config::SENTINEL_VERSION.to_string())),
+                    ("project".to_string(), serde_json::Value::String(project_path.to_string_lossy().to_string())),
+                ])
+            ));
+        }
+    }
+
     let esta_pausado = Arc::new(Mutex::new(false));
     let pausa_loop = Arc::clone(&esta_pausado);
     let (tx, rx) = mpsc::channel::<PathBuf>();
@@ -413,9 +449,9 @@ pub fn start_monitor(project: Option<String>) {
     let project_path_for_watcher = project_path.clone();
     let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
         if let Ok(event) = res {
-            if let EventKind::Modify(_) = event.kind {
+            if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_) | EventKind::Any) {
                 for path in event.paths {
-                    if !config_watcher.debe_ignorar(&path) && !is_file_excluded(&project_path_for_watcher, &path) {
+                    if path.is_file() && !config_watcher.debe_ignorar(&path) && !is_file_excluded(&project_path_for_watcher, &path) {
                         let _ = tx.send(path);
                     }
                 }
@@ -684,38 +720,31 @@ pub fn start_monitor(project: Option<String>) {
                         );
                         spinner_ai.finish_and_clear();
 
-                        // --- Reportar Hallazgos al Cerebro ---
-                        if let Ok(aprobado) = &resultado_analisis {
-                            let agent_config = crate::agent_config::AgentConfig::from_env();
-                            let mut payload = std::collections::HashMap::new();
-                            payload.insert("file".to_string(), serde_json::Value::String(changed_path.to_string_lossy().to_string()));
-                            payload.insert("status".to_string(), serde_json::Value::String(if *aprobado { "approved".to_string() } else { "rejected".to_string() }));
-                            payload.insert("message".to_string(), serde_json::Value::String(format!("Análisis completado para {}. Status: {}", file_name, if *aprobado { "SEGURO" } else { "CRÍTICO" })));
-                            
-                            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-                            let _ = rt.block_on(crate::agent_reporter::report_event(
-                                &agent_config,
-                                "analysis_completed",
-                                if *aprobado { "info" } else { "error" },
-                                payload
-                            ));
-                        }
+                             match resultado_analisis {
+                                 Ok((aprobado, consejo)) => {
+                                     let mut payload = std::collections::HashMap::new();
+                                     payload.insert("file".to_string(), serde_json::Value::String(changed_path.to_string_lossy().to_string()));
+                                     payload.insert("status".to_string(), serde_json::Value::String(if aprobado { "approved".to_string() } else { "rejected".to_string() }));
+                                     payload.insert("findings".to_string(), serde_json::Value::String(consejo.clone()));
+                                     payload.insert("message".to_string(), serde_json::Value::String(format!("Análisis IA: {}", if aprobado { "SEGURO" } else { "HALLAZGOS DETECTADOS" })));
+                                     
+                                     report_sync("analysis_completed", if aprobado { "info" } else { "warning" }, payload);
 
-                        match resultado_analisis {
-                            Ok(true) => {
-                                println!(
-                                    "   ✅ Código revisado. Sin tests, no se realizará commit automático."
-                                );
-                            }
-                            Ok(false) => {
-                                println!(
-                                    "   ⚠️  Se encontraron problemas. Revisa las sugerencias."
-                                );
-                            }
-                            Err(e) => {
-                                println!("   ❌ Error al analizar: {}", e);
-                            }
-                        }
+                                     if aprobado {
+                                         println!("   ✅ Código revisado. Sin tests, no se realizará commit automático.");
+                                     } else {
+                                         println!("   ⚠️  Se encontraron problemas. Revisa las sugerencias.");
+                                     }
+                                 },
+                                 Err(e) => {
+                                     report_sync("analysis_failed", "error", HashMap::from([
+                                         ("message".to_string(), serde_json::Value::String(format!("Error en análisis IA: {}", e))),
+                                         ("error".to_string(), serde_json::Value::String(e.to_string())),
+                                         ("file".to_string(), serde_json::Value::String(changed_path.to_string_lossy().to_string()))
+                                     ]));
+                                     println!("   ❌ Error al analizar: {}", e);
+                                 }
+                             }
                     }
                 }
                 _ => {
@@ -739,55 +768,99 @@ pub fn start_monitor(project: Option<String>) {
 
                         if !violaciones.is_empty() {
                             println!("\n🚩 {}", "VIOLACIONES DE ARQUITECTURA DETECTADAS:".bold().red());
-                            for v in violaciones {
+                            let mut violations_msg = String::new();
+                            for v in &violaciones {
                                 let label = match v.level {
-                                    crate::rules::RuleLevel::Error => "ERROR".red().bold(),
-                                    crate::rules::RuleLevel::Warning => "WARN".yellow().bold(),
-                                    crate::rules::RuleLevel::Info => "INFO".blue().bold(),
+                                    crate::rules::RuleLevel::Error => "ERROR",
+                                    crate::rules::RuleLevel::Warning => "WARN",
+                                    crate::rules::RuleLevel::Info => "INFO",
                                 };
-                                println!("   • [{}][{}]: {}", label, v.rule_name.yellow(), v.message);
+                                let line_info = format!("   • [{}][{}]: {}\n", label, v.rule_name.yellow(), v.message);
+                                print!("{}", line_info);
+                                violations_msg.push_str(&format!("[{}] {}: {}\n", label, v.rule_name, v.message));
                             }
+
+                            // Reportar violaciones estáticas al Cerebro
+                            let agent_config = crate::agent_config::AgentConfig::from_env();
+                            let mut payload = std::collections::HashMap::new();
+                            payload.insert("file".to_string(), serde_json::Value::String(changed_path.to_string_lossy().to_string()));
+                            payload.insert("violations".to_string(), serde_json::Value::String(violations_msg));
+                            payload.insert("message".to_string(), serde_json::Value::String(format!("⚠️ Se detectaron {} violaciones de reglas en {}", violaciones.len(), file_name)));
+                            
+                            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+                            let _ = rt.block_on(crate::agent_reporter::report_event(
+                                &agent_config,
+                                "static_analysis_violations",
+                                "warning",
+                                payload
+                            ));
                         }
 
                         let spinner_ai = ui::crear_progreso("   🤖 Analizando arquitectura con IA...");
                         let resultado_analisis = ai::analizar_arquitectura(&codigo, &file_name, Arc::clone(&stats), &config, &project_path, &changed_path);
                         spinner_ai.finish_and_clear();
 
-                        // --- Reportar Hallazgos al Cerebro ---
-                        if let Ok(aprobado) = &resultado_analisis {
-                            let agent_config = crate::agent_config::AgentConfig::from_env();
-                            let mut payload = std::collections::HashMap::new();
-                            payload.insert("file".to_string(), serde_json::Value::String(changed_path.to_string_lossy().to_string()));
-                            payload.insert("status".to_string(), serde_json::Value::String(if *aprobado { "approved".to_string() } else { "rejected".to_string() }));
-                            payload.insert("message".to_string(), serde_json::Value::String(format!("Análisis completado para {}. Status: {}", file_name, if *aprobado { "SEGURO" } else { "CRÍTICO" })));
-                            
-                            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-                            let _ = rt.block_on(crate::agent_reporter::report_event(
-                                &agent_config,
-                                "analysis_completed",
-                                if *aprobado { "info" } else { "error" },
-                                payload
-                            ));
-                        }
-
                         match resultado_analisis {
-                            Ok(true) => {
-                                if test_runner::ejecutar_tests(&test_path, &project_path).is_ok() {
-                                    let _ = docs::actualizar_documentacion(&codigo, &changed_path, &config, Arc::clone(&stats), &project_path);
-                                    let msg = git::generar_mensaje_commit(&codigo, &file_name, &config, Arc::clone(&stats), &project_path);
-                                    println!("\n🚀 Mensaje: {}", msg.bright_cyan().bold());
-                                    let query_commit = format!("Sentinel: Tests pasaron para {}. ¿Hago el commit con el mensaje '{}'? (s/n)", file_name, msg);
-                                    if let Some(r) = remote_prompt(&query_commit) {
-                                        git::preguntar_commit(&project_path, &msg, &r);
-                                    }
-                                } else {
-                                    let query_help = format!("Sentinel: Tests fallaron para {}. ¿Deseas ayuda de la IA para corregirlo? (s/n)", file_name);
-                                    if remote_prompt(&query_help).as_deref() == Some("s") {
-                                        let _ = test_runner::pedir_ayuda_test(&codigo, &test_path, &config, Arc::clone(&stats), &project_path);
+                            Ok((aprobado, consejo)) => {
+                                // Reportar Análisis al Cerebro
+                                let mut ai_payload = std::collections::HashMap::new();
+                                ai_payload.insert("file".to_string(), serde_json::Value::String(changed_path.to_string_lossy().to_string()));
+                                ai_payload.insert("status".to_string(), serde_json::Value::String(if aprobado { "approved".to_string() } else { "rejected".to_string() }));
+                                ai_payload.insert("findings".to_string(), serde_json::Value::String(consejo.clone()));
+                                report_sync("analysis_completed", if aprobado { "info" } else { "warning" }, ai_payload);
+
+                                if aprobado {
+                                    // Reportar que inician tests
+                                    report_sync("tests_starting", "info", HashMap::from([
+                                        ("test_path".to_string(), serde_json::Value::String(test_path.clone())),
+                                        ("message".to_string(), serde_json::Value::String(format!("🧪 Ejecutando tests para {}", file_name)))
+                                    ]));
+
+                                    match crate::tests::ejecutar_tests(&test_path, &project_path) {
+                                        Ok(_) => {
+                                            report_sync("test_result", "info", HashMap::from([
+                                                ("status".to_string(), serde_json::Value::String("passed".to_string())),
+                                                ("message".to_string(), serde_json::Value::String(format!("✅ Tests pasados con éxito para {}", file_name)))
+                                            ]));
+
+                                            let _ = docs::actualizar_documentacion(&codigo, &changed_path, &config, Arc::clone(&stats), &project_path);
+                                            let msg = git::generar_mensaje_commit(&codigo, &file_name, &config, Arc::clone(&stats), &project_path);
+                                            println!("\n🚀 Mensaje: {}", msg.bright_cyan().bold());
+                                            
+                                            // Reportar sugerencia de commit al Cerebro antes de preguntar
+                                            report_sync("commit_suggestion", "info", HashMap::from([
+                                                ("message".to_string(), serde_json::Value::String(msg.clone())),
+                                                ("file".to_string(), serde_json::Value::String(file_name.clone()))
+                                            ]));
+
+                                            let query_commit = format!("Sentinel: Tests pasaron para {}. ¿Hago el commit con el mensaje '{}'? (s/n)", file_name, msg);
+                                            if let Some(r) = remote_prompt(&query_commit) {
+                                                git::preguntar_commit(&project_path, &msg, &r);
+                                            }
+                                        },
+                                        Err(e) => {
+                                            report_sync("test_result", "error", HashMap::from([
+                                                ("status".to_string(), serde_json::Value::String("failed".to_string())),
+                                                ("error".to_string(), serde_json::Value::String(e.clone())),
+                                                ("message".to_string(), serde_json::Value::String(format!("❌ Tests fallidos para {}: {}", file_name, e)))
+                                            ]));
+
+                                            let query_help = format!("Sentinel: Tests fallaron para {}. ¿Deseas ayuda de la IA para corregirlo? (s/n)", file_name);
+                                            if remote_prompt(&query_help).as_deref() == Some("s") {
+                                                let _ = crate::tests::pedir_ayuda_test(&codigo, &test_path, &config, Arc::clone(&stats), &project_path);
+                                            }
+                                        }
                                     }
                                 }
+                            },
+                            Err(e) => {
+                                report_sync("analysis_failed", "error", HashMap::from([
+                                    ("message".to_string(), serde_json::Value::String(format!("Error en análisis IA: {}", e))),
+                                    ("error".to_string(), serde_json::Value::String(e.to_string())),
+                                    ("file".to_string(), serde_json::Value::String(changed_path.to_string_lossy().to_string()))
+                                ]));
+                                println!("   ❌ Error al analizar: {}", e);
                             }
-                            _ => {}
                         }
                     }
                 }
