@@ -29,9 +29,15 @@ async fn handle_command(
         "monitor" | "start" => {
             let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
             
-            // Lanzar el monitoreo en un hilo separado ya que start_monitor es bloqueante
-            // Nota: En una versión real, deberíamos manejar el estado del hilo (si ya hay uno corriendo)
+            println!("🔄 Reiniciando monitoreo sobre: {}", target);
+            
+            // Indicar a hilos previos que se detengan
+            crate::commands::monitor::STOP_SIGNAL.store(true, std::sync::atomic::Ordering::SeqCst);
+            
+            // Lanzar el monitoreo en un hilo separado
             thread::spawn(move || {
+                // Esperar un poco a que el hilo anterior se entere y libere recursos
+                thread::sleep(std::time::Duration::from_millis(1000));
                 crate::commands::monitor::start_monitor(Some(target));
             });
 

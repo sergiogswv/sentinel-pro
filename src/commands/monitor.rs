@@ -11,6 +11,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Instant;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+pub static STOP_SIGNAL: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn write_pid_file(pid_path: &Path, pid: u32) -> anyhow::Result<()> {
     if let Some(parent) = pid_path.parent() {
@@ -422,7 +425,7 @@ pub fn start_monitor(project: Option<String>) {
     .unwrap();
     let project_path_watcher = project_path.clone();
     watcher
-        .watch(&project_path_watcher.join("src"), RecursiveMode::Recursive)
+        .watch(&project_path_watcher, RecursiveMode::Recursive)
         .unwrap();
 
     let pausa_leer = Arc::clone(&pausa_loop);
@@ -494,10 +497,19 @@ pub fn start_monitor(project: Option<String>) {
     // Mostrar ayuda de comandos al inicio
     ui::mostrar_ayuda(Some(&config));
 
+    // Reiniciar señal de stop por si venimos de un reinicio
+    STOP_SIGNAL.store(false, Ordering::SeqCst);
+
     let mut ultimo_cambio: HashMap<PathBuf, Instant> = HashMap::new();
     let mut was_paused = false;
 
-    while let Ok(changed_path) = rx.recv() {
+    while !STOP_SIGNAL.load(Ordering::SeqCst) {
+        // Usar recv_timeout para poder revisar el STOP_SIGNAL periódicamente
+        let changed_path = match rx.recv_timeout(std::time::Duration::from_millis(500)) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
         println!("👀 CAMBIO DETECTADO: {}", changed_path.display());
         // Normalizar la path (resolver /../ y ./.)
         let changed_path = match std::fs::canonicalize(&changed_path) {
@@ -551,38 +563,18 @@ pub fn start_monitor(project: Option<String>) {
             }
         }
 
-        // Verificación adicional: asegurar que el archivo realmente fue modificado recientemente
-        // Esto previene que el watcher reporte cambios incorrectos
-        if let Ok(metadata) = std::fs::metadata(&changed_path) {
-            if let Ok(modified) = metadata.modified() {
-                if let Ok(elapsed) = modified.elapsed() {
-                    // Si el archivo no se modificó en los últimos 5 segundos, ignorarlo
-                    if elapsed.as_secs() > 5 {
-                        if std::env::var("VERBOSE").is_ok() {
-                            println!("   [DEBUG] {} ignorado (mtime antiguo: {}s)", changed_path.display(), elapsed.as_secs());
-                        }
-                        continue;
-                    }
-                }
-            }
-        }
-
-        ultimo_cambio.insert(changed_path.clone(), ahora);
-
-        if std::env::var("VERBOSE").is_ok() {
-            println!("   [DEBUG] Procesando cambio en: {}", changed_path.display());
-        }
-
         let file_name = changed_path
             .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
+            .unwrap_or_default()
+            .to_string_lossy()
             .to_string();
+
+        println!("📝 Procesando cambio en: {}", file_name);
 
         // --- Reportar al Cerebro (Modo Agente) ---
         let agent_config = crate::agent_config::AgentConfig::from_env();
         if agent_config.report_enabled {
+            println!("📡 Reportando evento a Cerebro...");
             let mut payload = std::collections::HashMap::new();
             payload.insert("file".to_string(), serde_json::Value::String(changed_path.to_string_lossy().to_string()));
             payload.insert("message".to_string(), serde_json::Value::String(format!("Archivo modificado: {}", file_name)));
@@ -592,12 +584,15 @@ pub fn start_monitor(project: Option<String>) {
                 .build()
                 .unwrap();
             
-            let _ = rt.block_on(crate::agent_reporter::report_event(
+            match rt.block_on(crate::agent_reporter::report_event(
                 &agent_config,
                 "file_change",
-                "warning", // Usamos warning para disparar Architect en Cerebro
+                "warning", 
                 payload
-            ));
+            )) {
+                Ok(_) => println!("   ✅ Evento reportado con éxito."),
+                Err(e) => eprintln!("   ❌ Error al reportar evento: {}", e),
+            }
         }
 
         // --- Actualizar Índice de Símbolos (SQLite) ---
