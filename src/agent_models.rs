@@ -34,6 +34,7 @@ pub struct OrchestratorCommand {
     #[serde(default)]
     pub options: HashMap<String, serde_json::Value>,
     pub request_id: String,
+    pub subcommand: Option<String>,
 }
 
 #[derive(Serialize, Debug)]

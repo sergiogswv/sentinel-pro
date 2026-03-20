@@ -11,9 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Instant;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-pub static STOP_SIGNAL: AtomicBool = AtomicBool::new(false);
+use ignore::gitignore::GitignoreBuilder;
 
 pub(crate) fn write_pid_file(pid_path: &Path, pid: u32) -> anyhow::Result<()> {
     if let Some(parent) = pid_path.parent() {
@@ -265,6 +263,18 @@ pub fn start_monitor(project: Option<String>) {
         path
     };
 
+    let project_path = match std::fs::canonicalize(&project_path) {
+        Ok(p) => {
+            let s = p.to_string_lossy();
+            if s.starts_with(r"\\?\") {
+                PathBuf::from(&s[4..])
+            } else {
+                p
+            }
+        }
+        Err(_) => project_path,
+    };
+
     // Guardar como proyecto activo
     let _ = SentinelConfig::save_active_project(&project_path);
 
@@ -287,6 +297,20 @@ pub fn start_monitor(project: Option<String>) {
         }
     }
     let rule_engine = Arc::new(rule_engine.with_index_db(Arc::clone(&index_db)));
+
+    // --- .gitignore support ---
+    let mut ignore_builder = GitignoreBuilder::new(&project_path);
+    let _ = ignore_builder.add_line(None, ".sentinel/");
+    let _ = ignore_builder.add_line(None, ".sentinel_stats.json");
+    let _ = ignore_builder.add_line(None, ".git/");
+    let _ = ignore_builder.add_line(None, "node_modules/");
+    let _ = ignore_builder.add_line(None, "target/");
+    if project_path.join(".gitignore").exists() {
+        let _ = ignore_builder.add(project_path.join(".gitignore"));
+    }
+    let gitignore = Arc::new(ignore_builder.build().unwrap_or_else(|_| {
+        GitignoreBuilder::new(&project_path).build().unwrap()
+    }));
 
     // Indexación inicial (Capa 1)
     let spinner_index = ui::crear_progreso("   🧠 Indexando proyecto (Capa 1)...");
@@ -410,11 +434,36 @@ pub fn start_monitor(project: Option<String>) {
 
     // Watcher
     let config_watcher = Arc::clone(&config);
+    let gitignore_watcher = Arc::clone(&gitignore);
     let project_path_for_watcher = project_path.clone();
     let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
         if let Ok(event) = res {
-            if let EventKind::Modify(_) = event.kind {
+            // Log any event if VERBOSE is on
+            if std::env::var("VERBOSE").is_ok() {
+                println!("   [DEBUG] Evento notify: {:?}", event);
+            }
+
+            // Capturar Modify, Create o Rename (algunos editores hacen swap de archivos)
+            let matches_kind = match event.kind {
+                EventKind::Modify(_) | EventKind::Create(_) | EventKind::Any => true,
+                _ => false,
+            };
+
+            if matches_kind {
                 for path in event.paths {
+                    // Normalize path and get relative version for gitignore matching
+                    let rel_path = path.strip_prefix(&project_path_for_watcher).unwrap_or(&path);
+                    
+                    // Check against .gitignore
+                    let is_ignored = gitignore_watcher.matched(rel_path, path.is_dir()).is_ignore();
+                    
+                    if is_ignored {
+                        if std::env::var("VERBOSE").is_ok() {
+                            println!("   [DEBUG] Ignorando por .gitignore: {}", rel_path.display());
+                        }
+                        continue;
+                    }
+
                     if !config_watcher.debe_ignorar(&path) && !is_file_excluded(&project_path_for_watcher, &path) {
                         let _ = tx.send(path);
                     }
@@ -497,19 +546,10 @@ pub fn start_monitor(project: Option<String>) {
     // Mostrar ayuda de comandos al inicio
     ui::mostrar_ayuda(Some(&config));
 
-    // Reiniciar señal de stop por si venimos de un reinicio
-    STOP_SIGNAL.store(false, Ordering::SeqCst);
-
     let mut ultimo_cambio: HashMap<PathBuf, Instant> = HashMap::new();
     let mut was_paused = false;
 
-    while !STOP_SIGNAL.load(Ordering::SeqCst) {
-        // Usar recv_timeout para poder revisar el STOP_SIGNAL periódicamente
-        let changed_path = match rx.recv_timeout(std::time::Duration::from_millis(500)) {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-
+    while let Ok(changed_path) = rx.recv() {
         println!("👀 CAMBIO DETECTADO: {}", changed_path.display());
         // Normalizar la path (resolver /../ y ./.)
         let changed_path = match std::fs::canonicalize(&changed_path) {
