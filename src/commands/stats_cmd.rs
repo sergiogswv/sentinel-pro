@@ -100,6 +100,11 @@ fn reset_stats(history_path: &Path, period: &str) {
         }
         "all" => {
             history.clear();
+            // También resetear los totales acumulados
+            if let Some(project_root) = history_dir.parent() {
+                let stats_path = project_root.join(".sentinel_stats.json");
+                let _ = fs::remove_file(&stats_path);
+            }
             println!("✅ Todas las estadísticas reseteadas");
         }
         _ => {
