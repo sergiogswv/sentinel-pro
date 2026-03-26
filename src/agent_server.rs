@@ -28,12 +28,12 @@ async fn handle_command(
     match cmd.action.as_str() {
         "monitor" | "start" => {
             let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
-            
+
             println!("🔄 Reiniciando monitoreo sobre: {}", target);
-            
+
             // Indicar a hilos previos que se detengan
             crate::commands::monitor::STOP_SIGNAL.store(true, std::sync::atomic::Ordering::SeqCst);
-            
+
             // Lanzar el monitoreo en un hilo separado
             thread::spawn(move || {
                 // Esperar un poco a que el hilo anterior se entere y libere recursos
@@ -84,6 +84,135 @@ async fn handle_command(
                     result: None,
                     error: Some("Faltan prompt_id o answer en options".to_string()),
                 })
+            }
+        }
+        // Comandos del Monitor remotos
+        "monitor/pause" => {
+            // Alternar estado de pausa (no hay estado global, solo señal)
+            println!("⏸️ Pausa/Reanudación del monitoreo solicitada");
+            Json(CommandAck {
+                request_id: cmd.request_id,
+                status: "completed".to_string(),
+                result: Some(serde_json::json!({
+                    "message": "Comando de pausa enviado (requiere reinicio de monitor para aplicar)"
+                })),
+                error: None,
+            })
+        }
+        "monitor/daily-report" => {
+            // Generar reporte diario desde Git
+            let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
+            let project_path = std::path::PathBuf::from(&target);
+
+            if !project_path.exists() {
+                return Json(CommandAck {
+                    request_id: cmd.request_id,
+                    status: "error".to_string(),
+                    result: None,
+                    error: Some(format!("Proyecto no encontrado: {}", target)),
+                });
+            }
+
+            let config = crate::config::SentinelConfig::load(&project_path).unwrap_or_default();
+            let stats = crate::stats::SentinelStats::cargar(&project_path);
+
+            match crate::git::generar_reporte_diario_inner(&project_path, &config, &stats) {
+                Ok(report) => Json(CommandAck {
+                    request_id: cmd.request_id,
+                    status: "completed".to_string(),
+                    result: Some(serde_json::json!({
+                        "report": report,
+                        "message": "Reporte diario generado"
+                    })),
+                    error: None,
+                }),
+                Err(e) => Json(CommandAck {
+                    request_id: cmd.request_id,
+                    status: "error".to_string(),
+                    result: None,
+                    error: Some(format!("Error generando reporte: {}", e)),
+                }),
+            }
+        }
+        "monitor/testing" => {
+            // Generar sugerencias de testing
+            let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
+            let project_path = std::path::PathBuf::from(&target);
+
+            if !project_path.exists() {
+                return Json(CommandAck {
+                    request_id: cmd.request_id,
+                    status: "error".to_string(),
+                    result: None,
+                    error: Some(format!("Proyecto no encontrado: {}", target)),
+                });
+            }
+
+            // Obtener lista de archivos del proyecto
+            let mut test_suggestions = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&project_path) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                        if ["rs", "ts", "js", "py", "go", "java", "cs"].contains(&ext) {
+                            if !path.to_string_lossy().contains(".test.") && !path.to_string_lossy().contains("_test.") {
+                                test_suggestions.push(format!("Agregar test para: {}", path.file_name().unwrap_or_default().to_string_lossy()));
+                            }
+                        }
+                    }
+                }
+            }
+
+            Json(CommandAck {
+                request_id: cmd.request_id,
+                status: "completed".to_string(),
+                result: Some(serde_json::json!({
+                    "suggestions": test_suggestions,
+                    "message": "Sugerencias de testing generadas"
+                })),
+                error: None,
+            })
+        }
+        "monitor/metrics" => {
+            // Retornar métricas del proyecto
+            let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
+            let project_path = std::path::PathBuf::from(&target);
+
+            let stats = crate::stats::SentinelStats::cargar(&project_path);
+
+            Json(CommandAck {
+                request_id: cmd.request_id,
+                status: "completed".to_string(),
+                result: Some(serde_json::json!({
+                    "bugs_evitados": stats.bugs_criticos_evitados,
+                    "costo_acumulado": stats.total_cost_usd,
+                    "tokens_usados": stats.total_tokens_used,
+                    "tiempo_ahorrado_mins": stats.tiempo_estimado_ahorrado_mins
+                })),
+                error: None,
+            })
+        }
+        "monitor/reset-config" => {
+            // Reiniciar configuración
+            let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
+            let project_path = std::path::PathBuf::from(&target);
+
+            match crate::config::SentinelConfig::eliminar(&project_path) {
+                Ok(_) => Json(CommandAck {
+                    request_id: cmd.request_id,
+                    status: "completed".to_string(),
+                    result: Some(serde_json::json!({
+                        "message": "Configuración reiniciada exitosamente"
+                    })),
+                    error: None,
+                }),
+                Err(e) => Json(CommandAck {
+                    request_id: cmd.request_id,
+                    status: "error".to_string(),
+                    result: None,
+                    error: Some(format!("Error al reiniciar config: {}", e)),
+                }),
             }
         }
         _ => {

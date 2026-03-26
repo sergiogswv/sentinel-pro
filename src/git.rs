@@ -46,6 +46,33 @@ pub fn generar_mensaje_commit(
     }
 }
 
+/// Genera un reporte de productividad diario usando Claude AI (versión interna que retorna el reporte).
+pub fn generar_reporte_diario_inner(
+    project_path: &Path,
+    config: &SentinelConfig,
+    stats: &SentinelStats,
+) -> Result<String, String> {
+    let logs = obtener_resumen_git(project_path);
+    if logs.is_empty() {
+        return Ok("No hay commits registrados el día de hoy.".to_string());
+    }
+
+    let prompt = format!(
+        "Actúa como un Lead Developer. Basado en estos mensajes de commit de hoy, \
+        genera un reporte de progreso diario para el equipo. \
+        Divide en: ✨ Logros Principales, 🛠️ Aspectos Técnicos (NestJS/Rust) y 🚀 Próximos Pasos. \
+        Sé profesional y directo.\n\nCommits del día:\n{}",
+        logs
+    );
+
+    // Usar stats directamente (no Arc<Mutex<>>)
+    let stats_arc = Arc::new(Mutex::new(stats.clone()));
+    match ai::consultar_ia_dinamico(prompt, ai::TaskType::Deep, config, stats_arc, project_path) {
+        Ok(reporte) => Ok(reporte),
+        Err(e) => Err(format!("Error al generar reporte: {}", e)),
+    }
+}
+
 /// Genera un reporte de productividad diario usando Claude AI.
 pub fn generar_reporte_diario(
     project_path: &Path,

@@ -51,6 +51,8 @@ impl super::AiProvider for AnthropicProvider {
 
         let body: serde_json::Value = serde_json::from_str(&body_text)?;
         let mut extracted_text = String::new();
+
+        // Intentar formato Anthropic: { content: [{ type: "text", text: "..." }, ...] }
         if let Some(contents) = body["content"].as_array() {
             for content in contents {
                 if content["type"] == "text" {
@@ -58,14 +60,45 @@ impl super::AiProvider for AnthropicProvider {
                         extracted_text.push_str(t);
                     }
                 } else if content["text"].is_string() {
-                    // Fallback para content blocks que traen text directo sin type explícito
                     extracted_text.push_str(content["text"].as_str().unwrap());
+                }
+            }
+        }
+        // Fallback: intentar formato OpenAI-compatible: { choices: [{ message: { content: "..." } }] }
+        else if let Some(choices) = body["choices"].as_array() {
+            if let Some(first_choice) = choices.get(0) {
+                if let Some(content) = first_choice["message"]["content"].as_str() {
+                    extracted_text = content.to_string();
+                }
+            }
+        }
+        // Fallback: intentar formato Gemini: { candidates: [{ content: { parts: [{ text: "..." }] } }] }
+        else if let Some(candidates) = body["candidates"].as_array() {
+            for candidate in candidates {
+                if let Some(parts) = candidate["content"]["parts"].as_array() {
+                    for part in parts {
+                        if let Some(t) = part["text"].as_str() {
+                            extracted_text.push_str(t);
+                        }
+                    }
                 }
             }
         }
 
         if extracted_text.is_empty() {
-            Err(anyhow::anyhow!("Estructura de Anthropic inesperada. Body: {}", body_text))
+            // Error más informativo con el formato real recibido
+            let format_type = if body["choices"].is_array() {
+                "OpenAI-compatible"
+            } else if body["candidates"].is_array() {
+                "Gemini"
+            } else {
+                "desconocido"
+            };
+            Err(anyhow::anyhow!(
+                "Respuesta de IA no pudo ser parseada (formato {}): {}",
+                format_type,
+                body_text
+            ))
         } else {
             Ok(extracted_text)
         }
