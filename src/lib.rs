@@ -30,3 +30,4 @@ pub mod agent_models;
 pub mod agent_reporter;
 pub mod agent_server;
 pub mod agent_interaction;
+pub mod sentinel_cerebro_bridge;

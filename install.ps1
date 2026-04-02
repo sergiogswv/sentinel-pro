@@ -197,3 +197,73 @@ Write-Host "   sentinel" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "🎉 ¡Disfruta de Sentinel Pro!" -ForegroundColor Green
 Write-Host ""
+
+# ─── INSTALACIÓN DEL ADK DE SENTINEL (Python) ────────────────────────────────
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "  Instalando Sentinel ADK (Python Sidecar con IA)" -ForegroundColor Cyan
+Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host ""
+
+# Verificar si Python está instalado
+Show-Info "Verificando instalación de Python..."
+try {
+    $pythonVersion = python --version 2&1
+    Show-Success "Python encontrado: $pythonVersion"
+} catch {
+    Show-Error "Python no está instalado. Por favor instala Python 3.9+ desde https://python.org/"
+}
+
+# Crear directorio del proyecto
+$projectDir = $PSScriptRoot
+if (-not $projectDir) {
+    $projectDir = Get-Location
+}
+
+# Crear virtualenv si no existe
+$venvPath = Join-Path $projectDir ".venv"
+if (-not (Test-Path $venvPath)) {
+    Show-Info "Creando virtualenv en $venvPath..."
+    try {
+        python -m venv .venv
+        Show-Success "Virtualenv creado exitosamente."
+    } catch {
+        Show-Error "No se pudo crear el virtualenv. ¿Está Python instalado correctamente?"
+    }
+} else {
+    Show-Info "Virtualenv ya existe en $venvPath"
+}
+
+# Instalar dependencias del ADK
+Show-Info "Instalando dependencias del Sentinel ADK..."
+try {
+    & (Join-Path $venvPath "Scripts\Activate.ps1")
+    pip install -r sentinel_adk/requirements.txt
+    if ($LASTEXITCODE -eq 0) {
+        Show-Success "Dependencias del ADK instaladas correctamente."
+    } else {
+        Show-Error "Error instalando dependencias del ADK."
+    }
+} catch {
+    Show-Error "No se pudieron instalar las dependencias del ADK: $_"
+}
+
+# Crear archivo .env de ejemplo si no existe
+$envFile = Join-Path $projectDir "sentinel_adk\.env"
+$envExample = Join-Path $projectDir "sentinel_adk\.env.example"
+
+if (-not (Test-Path $envFile) -and (Test-Path $envExample)) {
+    Show-Info "Creando archivo de configuración .env..."
+    Copy-Item $envExample $envFile
+    Show-Success "Archivo .env creado. Por favor configura tus API keys."
+}
+
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Green
+Write-Host "  ✨ INSTALACIÓN DEL ADK COMPLETADA ✨" -ForegroundColor Green
+Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Green
+Write-Host ""
+Write-Host "Para configurar el ADK:" -ForegroundColor White
+Write-Host "  1. Edita: sentinel_adk\.env" -ForegroundColor Yellow
+Write-Host "  2. Agrega tu GOOGLE_API_KEY (obtenla en https://makersuite.google.com/app/apikey)" -ForegroundColor Yellow
+Write-Host ""

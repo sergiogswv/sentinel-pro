@@ -4,23 +4,40 @@ use axum::{
 };
 use crate::agent_config::AgentConfig;
 use crate::agent_models::{OrchestratorCommand, CommandAck};
+use crate::agents::base::AgentContext;
 use std::net::SocketAddr;
 use std::thread;
+use std::sync::Arc;
+use std::collections::HashMap;
 
 pub async fn start_server(config: AgentConfig) -> anyhow::Result<()> {
     let app = Router::new()
-        .route("/command", post(handle_command));
+        .route("/command", post(http_handle_command));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
     println!("🚀 Sentinel Agente escuchando en http://{}", addr);
-    
+
+    // Reportar evento ready al Cerebro cuando Sentinel Core está listo
+    if config.report_enabled {
+        let _ = crate::agent_reporter::report_event(
+            &config,
+            "sentinel_ready",
+            "info",
+            HashMap::from([
+                ("message".to_string(), serde_json::Value::String(format!("Sentinel Core v{} listo", crate::config::SENTINEL_VERSION))),
+                ("version".to_string(), serde_json::Value::String(crate::config::SENTINEL_VERSION.to_string())),
+                ("port".to_string(), serde_json::Value::Number(config.port.into())),
+            ])
+        ).await;
+    }
+
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
 }
 
-async fn handle_command(
+async fn http_handle_command(
     Json(cmd): Json<OrchestratorCommand>,
 ) -> Json<CommandAck> {
     println!("📨 Comando recibido: action={} target={:?}", cmd.action, cmd.target);
@@ -86,6 +103,42 @@ async fn handle_command(
                 })
             }
         }
+        // Comandos de Análisis (usando el bridge)
+        "analyze" | "check" | "audit" | "review" => {
+            let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
+
+            // Construir AgentContext
+            let project_root = if target == "." {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            } else {
+                std::path::PathBuf::from(&target)
+            };
+
+            let config_sentinel = crate::config::SentinelConfig::load(&project_root)
+                .unwrap_or_default();
+
+            let stats = Arc::new(std::sync::Mutex::new(
+                crate::stats::SentinelStats::cargar(&project_root)
+            ));
+
+            let db_path = project_root.join(".sentinel/index.db");
+            let index_db = crate::index::IndexDb::open(&db_path)
+                .ok()
+                .map(Arc::new);
+
+            let agent_context = AgentContext {
+                config: Arc::new(config_sentinel),
+                stats,
+                project_root: project_root.clone(),
+                index_db,
+            };
+
+            // Ejecutar comando usando el bridge
+            let cerebro_config = crate::agent_config::AgentConfig::from_env();
+            let ack = crate::sentinel_cerebro_bridge::handle_command(cmd, &cerebro_config, &agent_context).await;
+            Json(ack)
+        }
+
         // Comandos del Monitor remotos
         "monitor/pause" => {
             // Alternar estado de pausa (no hay estado global, solo señal)

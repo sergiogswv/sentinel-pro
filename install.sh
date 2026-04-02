@@ -97,6 +97,54 @@ EOF
     success "Archivo de configuración creado en $CONFIG_FILE"
 fi
 
+# ─── INSTALACIÓN DEL ADK DE SENTINEL (Python) ────────────────────────────────
+echo ""
+echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}  Instalando Sentinel ADK (Python Sidecar con IA)${NC}"
+echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+echo ""
+
+# Verificar si Python está instalado
+info "Verificando instalación de Python..."
+if ! command -v python3 &> /dev/null; then
+    error "Python 3 no está instalado. Por favor instala Python 3.9+ desde https://python.org/"
+fi
+success "Python encontrado: $(python3 --version)"
+
+# Obtener directorio del script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Crear virtualenv si no existe
+VENV_PATH="$SCRIPT_DIR/.venv"
+if [ ! -d "$VENV_PATH" ]; then
+    info "Creando virtualenv en $VENV_PATH..."
+    python3 -m venv .venv || error "No se pudo crear el virtualenv"
+    success "Virtualenv creado exitosamente."
+else
+    info "Virtualenv ya existe en $VENV_PATH"
+fi
+
+# Instalar dependencias del ADK
+info "Instalando dependencias del Sentinel ADK..."
+source "$VENV_PATH/bin/activate"
+pip install -r sentinel_adk/requirements.txt || error "Error instalando dependencias del ADK"
+success "Dependencias del ADK instaladas correctamente."
+
+# Crear archivo .env de ejemplo si no existe
+ENV_FILE="$SCRIPT_DIR/sentinel_adk/.env"
+ENV_EXAMPLE="$SCRIPT_DIR/sentinel_adk/.env.example"
+if [ ! -f "$ENV_FILE" ] && [ -f "$ENV_EXAMPLE" ]; then
+    info "Creando archivo de configuración .env..."
+    cp "$ENV_EXAMPLE" "$ENV_FILE"
+    success "Archivo .env creado. Por favor configura tus API keys."
+fi
+
+echo ""
+echo -e "${GREEN}═════════════════��═════════════════════════════════════════${NC}"
+echo -e "${GREEN}  ✨ INSTALACIÓN DEL ADK COMPLETADA ✨${NC}"
+echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
+echo ""
+
 echo -e "${GREEN}"
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║                                                           ║"
@@ -114,7 +162,11 @@ echo ""
 echo "2. Configura tu API key en:"
 echo -e "   ${YELLOW}$CONFIG_FILE${NC}"
 echo ""
-echo "3. Ejecuta Sentinel en tu proyecto:"
+echo "3. Configura el ADK:"
+echo -e "   ${YELLOW}$ENV_FILE${NC}"
+echo -e "   Obtén tu GOOGLE_API_KEY en: ${YELLOW}https://makersuite.google.com/app/apikey${NC}"
+echo ""
+echo "4. Ejecuta Sentinel en tu proyecto:"
 echo -e "   ${YELLOW}sentinel${NC}"
 echo ""
 echo -e "${GREEN}🎉 ¡Disfruta de Sentinel Pro!${NC}"
