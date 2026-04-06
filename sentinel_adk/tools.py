@@ -31,7 +31,7 @@ CORE = settings.sentinel_core_url
 # Helper interno de llamada al Core Rust
 # ──────────────────────────────────────────────
 
-async def call_core(action: str, target: Optional[str] = None, subcommand: Optional[str] = None, options: Optional[dict] = None) -> dict:
+async def call_core(action: str, target: Optional[str] = None, subcommand: Optional[str] = None, options: Optional[dict] = None, request_id: Optional[str] = None) -> dict:
     """
     Envía un OrchestratorCommand al Sentinel Core (Rust).
     Es el único punto de contacto con el proceso Rust.
@@ -44,6 +44,8 @@ async def call_core(action: str, target: Optional[str] = None, subcommand: Optio
         payload["subcommand"] = subcommand
     if options:
         payload["options"] = options
+    # request_id es requerido por el Core Rust
+    payload["request_id"] = request_id or f"sentinel-adk-{int(time.time() * 1000)}"
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -66,7 +68,7 @@ async def call_core(action: str, target: Optional[str] = None, subcommand: Optio
 async def execute_check(target: str = ".") -> tuple[dict, int]:
     """Check rápido: dead code, unused imports, complejidad. Retorna (raw_result, memory_id)."""
     start = time.monotonic()
-    result = await call_core("pro", target=target, subcommand="check")
+    result = await call_core("check", target=target)
     duration_ms = int((time.monotonic() - start) * 1000)
 
     severity = "error" if result.get("status") == "error" else "info"
@@ -92,7 +94,7 @@ async def execute_check(target: str = ".") -> tuple[dict, int]:
 async def execute_audit(target: str = ".") -> tuple[dict, int]:
     """Auditoría completa con ReviewerAgent. Retorna (raw_result, memory_id)."""
     start = time.monotonic()
-    result = await call_core("pro", target=target, subcommand="audit")
+    result = await call_core("audit", target=target)
     duration_ms = int((time.monotonic() - start) * 1000)
 
     severity = "error" if result.get("status") == "error" else "warning"
@@ -104,7 +106,7 @@ async def execute_audit(target: str = ".") -> tuple[dict, int]:
 async def execute_report(target: str = ".") -> tuple[dict, int]:
     """Reporte de calidad. Retorna (raw_result, memory_id)."""
     start = time.monotonic()
-    result = await call_core("pro", target=target, subcommand="report")
+    result = await call_core("report", target=target)
     duration_ms = int((time.monotonic() - start) * 1000)
 
     mid = await memory.save_finding("report_completed", "info", result, target)
@@ -115,7 +117,7 @@ async def execute_report(target: str = ".") -> tuple[dict, int]:
 async def execute_fix(target: str = ".", options: Optional[dict] = None) -> tuple[dict, int]:
     """Auto-fix de bugs. Retorna (raw_result, memory_id)."""
     start = time.monotonic()
-    result = await call_core("pro", target=target, subcommand="fix", options=options)
+    result = await call_core("fix", target=target, options=options)
     duration_ms = int((time.monotonic() - start) * 1000)
 
     severity = "warning" if result.get("status") == "error" else "info"
@@ -127,7 +129,7 @@ async def execute_fix(target: str = ".", options: Optional[dict] = None) -> tupl
 async def execute_review(target: str = ".") -> tuple[dict, int]:
     """Review de arquitectura. Retorna (raw_result, memory_id)."""
     start = time.monotonic()
-    result = await call_core("pro", target=target, subcommand="review")
+    result = await call_core("review", target=target)
     duration_ms = int((time.monotonic() - start) * 1000)
 
     mid = await memory.save_finding("review_completed", "info", result, target)
@@ -189,4 +191,5 @@ ACTION_MAP = {
     "daily-report": execute_monitor_daily_report,
     "metrics":      execute_monitor_metrics,
     "testing":      execute_monitor_testing,
+    "analyze":      execute_check,  # Alias: analyze usa check
 }

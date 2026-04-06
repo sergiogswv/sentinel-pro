@@ -108,7 +108,21 @@ async def handle_command(
     if not executor:
         # Intentar pasar directo al Core por si es una acción nueva
         print(f"⚠️  Acción '{actual_action}' no en ACTION_MAP — enviando directo al Core")
-        raw = await call_core(action, target=target, subcommand=subcommand, options=options)
+        raw = await call_core(action, target=target, subcommand=subcommand, options=options, request_id=request_id)
+        # Reportar resultado a Cerebro aunque sea error
+        await report_to_cerebro(
+            f"sentinel_{actual_action}_completed",
+            "error" if raw.get("status") == "error" else "info",
+            {
+                "action": actual_action,
+                "target": target,
+                "file": target,
+                "raw_status": raw.get("status"),
+                "finding": f"Análisis {actual_action}: {raw.get('error', 'Completado')}",
+                "recommendation": str(raw.get("result", "Verificar resultado")),
+                "issues_count": 0,
+            }
+        )
         return {
             "request_id": request_id,
             "status": raw.get("status", "error"),
@@ -128,7 +142,20 @@ async def handle_command(
     except Exception as exc:
         error_msg = f"Error ejecutando '{actual_action}': {exc}"
         print(f"❌ {error_msg}")
-        await report_to_cerebro(f"sentinel_{actual_action}_error", "error", {"error": error_msg, "action": actual_action})
+        # Reportar error a Cerebro con info del target
+        await report_to_cerebro(
+            f"sentinel_{actual_action}_error",
+            "error",
+            {
+                "error": error_msg,
+                "action": actual_action,
+                "target": target,
+                "file": target,
+                "finding": f"Error en análisis {actual_action}: {str(exc)[:100]}",
+                "recommendation": "Verificar conexión con Sentinel Core",
+                "issues_count": 0,
+            }
+        )
         return {"request_id": request_id, "status": "error", "result": None, "error": error_msg}
 
     # ── 5. Recuperar contexto histórico de memoria ────────────────────
@@ -155,6 +182,20 @@ async def handle_command(
         analysis = f"[Análisis LLM no disponible: {exc}]"
         print(f"⚠️  LLM falló, se retorna raw result: {exc}")
 
+    # GARANTÍA: summary nunca vacío (requerido por Cerebro Proactivo)
+    if not analysis or not analysis.strip():
+        res_tmp = raw_result.get("result", {})
+        tmp_count = 0
+        if isinstance(res_tmp, dict):
+            tmp_count = len(res_tmp.get("issues", []))
+            if "files" in res_tmp:
+                for f in res_tmp["files"]:
+                    tmp_count += len(f.get("issues", []))
+        analysis = f"Análisis {actual_action} completado para {target}. {tmp_count} issues detectados."
+        if tmp_count > 0:
+            analysis += " Revisar el archivo para más detalles."
+        print(f"⚠️  [Sentinel] summary vacío — usando fallback de contenido")
+
     # ── 7. Determinar severidad final para el evento ──────────────────
     severity = _infer_severity(actual_action, raw_result, analysis)
 
@@ -180,21 +221,21 @@ async def handle_command(
     if isinstance(res_data, dict) and "files" in res_data and len(res_data["files"]) > 0:
         affected_file = res_data["files"][0].get("path")
 
-    # ── 9. Reportar a Cerebro ─────────��───────────────────────────────
+    # ── 9. Reportar a Cerebro ─────────────────────────────────────────
     await report_to_cerebro(
         event_type=f"sentinel_{actual_action.replace('-', '_')}_completed",
         severity=severity,
         payload={
             "action": actual_action,
             "target": target,
-            "summary": analysis,
+            "summary": analysis,           # Siempre tiene contenido (garantía aplicada arriba)
             "memory_id": memory_id,
             "raw_status": raw_result.get("status"),
-            # Campos para Dashboard (compatibles con Architect/Cerebro)
+            # Campos estandarizados para Cerebro Proactivo
             "finding": finding_desc,
             "recommendation": analysis[:2000] if analysis else "Revisar hallazgos de calidad detectados",
             "file": affected_file or target,
-            "issues_count": issues_count,
+            "issues_count": issues_count,  # ✅ Ya correcto
         },
     )
 
