@@ -11,26 +11,38 @@ use std::sync::{Arc, Mutex};
 use crate::config::SentinelConfig;
 use crate::stats::SentinelStats;
 
-/// Ejecuta los tests de un archivo específico usando Jest.
-///
-/// La salida de Jest se muestra en tiempo real en la consola.
-pub fn ejecutar_tests(test_path: &str, project_path: &Path) -> Result<(), String> {
+/// Ejecuta los tests de un archivo específico usando el comando configurado.
+pub fn ejecutar_tests(test_path: &str, project_path: &Path, config: &SentinelConfig) -> Result<(), String> {
     println!("🧪 Ejecutando tests: {}", test_path.cyan());
-    println!(); // Línea en blanco para separar
+    
+    let cmd_str = if config.test_command.contains("{path}") {
+        config.test_command.replace("{path}", test_path)
+    } else {
+        format!("{} {}", config.test_command, test_path)
+    };
 
-    // 🛡️ Sandboxing: Limpiar variables de entorno para evitar acceso a secretos (AWS_KEYS, API_TOKENS)
-    let status = Command::new("npx")
-        .args(["jest", test_path, "--passWithNoTests", "--colors"])
+    println!("   Comando: {}", cmd_str.dimmed());
+    println!(); 
+
+    // Ejecutar vía shell para soportar argumentos en el comando
+    #[cfg(windows)]
+    let mut command = Command::new("pwsh");
+    #[cfg(windows)]
+    command.arg("-Command");
+
+    #[cfg(not(windows))]
+    let mut command = Command::new("sh");
+    #[cfg(not(windows))]
+    command.arg("-c");
+
+    let status = command
+        .arg(&cmd_str)
         .current_dir(project_path)
-        .env_clear() 
-        .env("PATH", std::env::var("PATH").unwrap_or_default())
         .env("NODE_ENV", "test")
-        .env("USER", std::env::var("USER").unwrap_or_default())
-        .env("HOME", std::env::var("HOME").unwrap_or_default())
         .status()
-        .map_err(|e| format!("Error al ejecutar Jest: {}", e))?;
+        .map_err(|e| format!("Error al ejecutar comando de test: {}", e))?;
 
-    println!(); // Línea en blanco después de la salida de Jest
+    println!();
 
     if status.success() {
         println!("{}", "   ✅ Tests pasados con éxito".green());

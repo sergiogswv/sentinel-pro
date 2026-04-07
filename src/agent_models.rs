@@ -31,6 +31,7 @@ impl AgentEvent {
 pub struct OrchestratorCommand {
     pub action: String,
     pub target: Option<String>,
+    pub subcommand: Option<String>,
     #[serde(default)]
     pub options: HashMap<String, serde_json::Value>,
     pub request_id: String,

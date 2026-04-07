@@ -135,7 +135,7 @@ fn main() {
         }
         None => {
             // Comportamiento por defecto (legacy)
-            commands::monitor::start_monitor(None);
+            commands::monitor::start_monitor(None, false);
         }
     }
 }

@@ -162,6 +162,8 @@ pub struct SentinelConfig {
     pub ai_analysis: AiAnalysisConfig,
 
     // --- Language Detection (Capa 3) ---
+    #[serde(default)]
+    pub auto_mode: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detected_languages: Option<Vec<String>>, // Auto-detected: ["java", "rust", "typescript", etc.]
 }
@@ -189,7 +191,7 @@ impl SentinelConfig {
             project_name: name,
             framework,
             manager: manager.clone(),
-            test_command: format!("{} run test", manager),
+            test_command: if manager == "npm" { "npm run test --".to_string() } else { format!("{} run test", manager) },
             architecture_rules: rules,
             file_extensions: extensions,
             code_language,
@@ -230,6 +232,7 @@ impl SentinelConfig {
             }),
             rule_config: RuleConfig::default(),
             ai_analysis: AiAnalysisConfig::default(),
+            auto_mode: false,
             detected_languages: None,
         }
     }

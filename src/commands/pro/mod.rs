@@ -314,16 +314,38 @@ fn handle_ml(
     }
 }
 
-fn handle_clean_cache(
+pub fn handle_clean_cache(
     target: Option<&str>,
-    _agent_context: &AgentContext,
+    agent_context: &AgentContext,
     output_mode: crate::commands::OutputMode,
 ) {
-    // Placeholder
+    let cache_dir = if let Some(t) = target {
+        std::path::PathBuf::from(t).join(".sentinel").join("cache")
+    } else {
+        agent_context.project_root.join(".sentinel").join("cache")
+    };
+
     if output_mode != crate::commands::OutputMode::Quiet {
-        match target {
-            Some(t) => println!("CleanCache handler stub: {}", t),
-            None => println!("CleanCache handler stub: all"),
+        println!("🗑️  Limpiando caché en: {}", cache_dir.display());
+    }
+
+    if cache_dir.exists() {
+        match std::fs::remove_dir_all(&cache_dir) {
+            Ok(_) => {
+                let _ = std::fs::create_dir_all(&cache_dir); // Recrear carpeta vacía
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("✅ Caché limpiada correctamente.");
+                }
+            }
+            Err(e) => {
+                if output_mode != crate::commands::OutputMode::Quiet {
+                    println!("❌ Error al limpiar caché: {}", e);
+                }
+            }
+        }
+    } else {
+        if output_mode != crate::commands::OutputMode::Quiet {
+            println!("ℹ️  No hay caché que limpiar.");
         }
     }
 }

@@ -51,11 +51,16 @@ async fn http_handle_command(
             // Indicar a hilos previos que se detengan
             crate::commands::monitor::STOP_SIGNAL.store(true, std::sync::atomic::Ordering::SeqCst);
 
+            let auto_mode = cmd.options.get("auto")
+                .and_then(|v| v.as_bool())
+                .or_else(|| cmd.options.get("auto_mode").and_then(|v| v.as_bool()))
+                .unwrap_or(false);
+
             // Lanzar el monitoreo en un hilo separado
             thread::spawn(move || {
                 // Esperar un poco a que el hilo anterior se entere y libere recursos
                 thread::sleep(std::time::Duration::from_millis(1000));
-                crate::commands::monitor::start_monitor(Some(target));
+                crate::commands::monitor::start_monitor(Some(target), auto_mode);
             });
 
             Json(CommandAck {
@@ -103,7 +108,53 @@ async fn http_handle_command(
                 })
             }
         }
-        // Comandos de Análisis (usando el bridge)
+        "pro" => {
+            let sub = cmd.subcommand.clone().unwrap_or_default();
+            if sub == "clean-cache" {
+                let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
+                let project_path = std::path::PathBuf::from(&target);
+
+                return Json(match crate::ai::cache::limpiar_cache(&project_path) {
+                    Ok(_) => CommandAck {
+                        request_id: cmd.request_id,
+                        status: "completed".to_string(),
+                        result: Some(serde_json::json!({
+                            "message": "Caché de IA limpiado exitosamente."
+                        })),
+                        error: None,
+                    },
+                    Err(e) => CommandAck {
+                        request_id: cmd.request_id,
+                        status: "error".to_string(),
+                        result: None,
+                        error: Some(format!("Error al limpiar caché: {}", e)),
+                    },
+                });
+            } else if ["analyze", "check", "audit", "review"].contains(&sub.as_str()) {
+                // Modificar el action para que el bridge lo entienda
+                let mut modified_cmd = cmd;
+                modified_cmd.action = sub;
+                
+                let target = modified_cmd.target.clone().unwrap_or_else(|| ".".to_string());
+                let project_root = if target == "." { std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")) } else { std::path::PathBuf::from(&target) };
+                let config_sentinel = crate::config::SentinelConfig::load(&project_root).unwrap_or_default();
+                let stats = Arc::new(std::sync::Mutex::new(crate::stats::SentinelStats::cargar(&project_root)));
+                let db_path = project_root.join(".sentinel/index.db");
+                let index_db = crate::index::IndexDb::open(&db_path).ok().map(Arc::new);
+                let agent_context = AgentContext { config: Arc::new(config_sentinel), stats, project_root: project_root.clone(), index_db };
+                
+                let cerebro_config = crate::agent_config::AgentConfig::from_env();
+                let ack = crate::sentinel_cerebro_bridge::handle_command(modified_cmd, &cerebro_config, &agent_context).await;
+                return Json(ack);
+            } else {
+                return Json(CommandAck {
+                    request_id: cmd.request_id,
+                    status: "rejected".to_string(),
+                    result: None,
+                    error: Some(format!("Subcomando PRO desconocido: {}", sub)),
+                });
+            }
+        }
         "analyze" | "check" | "audit" | "review" => {
             let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
 
@@ -265,6 +316,27 @@ async fn http_handle_command(
                     status: "error".to_string(),
                     result: None,
                     error: Some(format!("Error al reiniciar config: {}", e)),
+                }),
+            }
+        }
+        "monitor/clean-cache" | "clean-cache" => {
+            let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
+            let project_path = std::path::PathBuf::from(&target);
+
+            match crate::ai::cache::limpiar_cache(&project_path) {
+                Ok(_) => Json(CommandAck {
+                    request_id: cmd.request_id,
+                    status: "completed".to_string(),
+                    result: Some(serde_json::json!({
+                        "message": "Caché de IA limpiado exitosamente."
+                    })),
+                    error: None,
+                }),
+                Err(e) => Json(CommandAck {
+                    request_id: cmd.request_id,
+                    status: "error".to_string(),
+                    result: None,
+                    error: Some(format!("Error al limpiar caché: {}", e)),
                 }),
             }
         }

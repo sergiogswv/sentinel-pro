@@ -6,3 +6,9 @@
 errors.txt
 .qdrant-initialized
 .worktrees/
+*.pyc
+*.log
+# Python cache
+__pycache__/
+*.py[cod]
+*.class

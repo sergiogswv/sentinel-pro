@@ -1,3 +1,8 @@
+use crate::agent_config::AgentConfig;
+use crate::agent_models::{AgentEvent, CommandAck, OrchestratorCommand};
+use crate::agent_reporter::report_event;
+use crate::agents::base::{AgentContext, Task, TaskType};
+use crate::agents::orchestrator::AgentOrchestrator;
 /// sentinel_cerebro_bridge.rs — Puente entre Cerebro ↔ Sentinel Core ↔ LLM.
 ///
 /// FLUJO por comando:
@@ -13,13 +18,7 @@
 /// CONTRATO MANTENIDO:
 ///   Input:  OrchestratorCommand { action, target?, options?, request_id? }
 ///   Output: CommandAck { request_id?, status, result?, error? }
-
 use std::collections::HashMap;
-use crate::agent_config::AgentConfig;
-use crate::agent_models::{AgentEvent, CommandAck, OrchestratorCommand};
-use crate::agents::base::{AgentContext, Task, TaskType};
-use crate::agents::orchestrator::AgentOrchestrator;
-use crate::agent_reporter::report_event;
 
 /// Resultado del análisis de Sentinel
 #[derive(Debug, Clone)]
@@ -54,21 +53,23 @@ pub async fn handle_command(
     let action = cmd.action.clone();
     let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
 
-    println!("📡 [Sentinel Bridge] Comando recibido: action='{}' target='{}'", action, target);
+    println!(
+        "📡 [Sentinel Bridge] Comando recibido: action='{}' target='{}'",
+        action, target
+    );
 
     // Emitir evento de inicio
-    let _ = report_event(
-        config,
-        &format!("sentinel_{}_started", action),
-        "info",
-        {
-            let mut payload = HashMap::new();
-            payload.insert("action".to_string(), serde_json::json!(action));
-            payload.insert("target".to_string(), serde_json::json!(target.clone()));
-            payload.insert("request_id".to_string(), serde_json::json!(request_id.clone()));
-            payload
-        },
-    ).await;
+    let _ = report_event(config, &format!("sentinel_{}_started", action), "info", {
+        let mut payload = HashMap::new();
+        payload.insert("action".to_string(), serde_json::json!(action));
+        payload.insert("target".to_string(), serde_json::json!(target.clone()));
+        payload.insert(
+            "request_id".to_string(),
+            serde_json::json!(request_id.clone()),
+        );
+        payload
+    })
+    .await;
 
     // Ejecutar acción correspondiente
     let result = match action.as_str() {
@@ -77,6 +78,22 @@ pub async fn handle_command(
         "audit" => audit_project(&target, agent_context, config).await,
         "review" => review_architecture(&target, agent_context, config).await,
         "status" => get_status(agent_context, config).await,
+        "clean-cache" => {
+            crate::commands::pro::handle_clean_cache(
+                Some(&target),
+                agent_context,
+                crate::commands::OutputMode::Quiet,
+            );
+            Ok(AnalysisResult {
+                action: "clean_cache".to_string(),
+                target: target.clone(),
+                status: "success".to_string(),
+                findings: Vec::new(),
+                raw_output: "Caché limpiada".to_string(),
+                analysis_summary: "Caché de Sentinel limpiada correctamente".to_string(),
+                severity: "info".to_string(),
+            })
+        }
         _ => Err(anyhow::anyhow!("Acción desconocida: {}", action)),
     };
 
@@ -87,14 +104,32 @@ pub async fn handle_command(
 
             // Construir descripción del hallazgo
             let finding_desc = if analysis.findings.is_empty() {
-                format!("Análisis {} completado: No se encontraron problemas", action)
+                format!(
+                    "Análisis {} completado: No se encontraron problemas",
+                    action
+                )
             } else {
-                let critical = analysis.findings.iter().filter(|f| f.severity == "critical").count();
-                let errors = analysis.findings.iter().filter(|f| f.severity == "error").count();
-                let warnings = analysis.findings.iter().filter(|f| f.severity == "warning").count();
+                let critical = analysis
+                    .findings
+                    .iter()
+                    .filter(|f| f.severity == "critical")
+                    .count();
+                let errors = analysis
+                    .findings
+                    .iter()
+                    .filter(|f| f.severity == "error")
+                    .count();
+                let warnings = analysis
+                    .findings
+                    .iter()
+                    .filter(|f| f.severity == "warning")
+                    .count();
 
                 if critical > 0 {
-                    format!("¡ALERTA! {} problemas críticos detectados en {}", critical, target)
+                    format!(
+                        "¡ALERTA! {} problemas críticos detectados en {}",
+                        critical, target
+                    )
                 } else if errors > 0 {
                     format!("{} errores detectados en {}", errors, target)
                 } else {
@@ -103,7 +138,9 @@ pub async fn handle_command(
             };
 
             // Extraer primer archivo afectado
-            let affected_file = analysis.findings.first()
+            let affected_file = analysis
+                .findings
+                .first()
                 .map(|f| f.file.clone())
                 .unwrap_or_else(|| target.clone());
 
@@ -111,7 +148,9 @@ pub async fn handle_command(
             let recommendation = if analysis.findings.is_empty() {
                 "No se requieren cambios".to_string()
             } else {
-                analysis.findings.iter()
+                analysis
+                    .findings
+                    .iter()
                     .filter_map(|f| f.recommendation.clone())
                     .collect::<Vec<_>>()
                     .join("; ")
@@ -127,16 +166,26 @@ pub async fn handle_command(
                     payload.insert("action".to_string(), serde_json::json!(action));
                     payload.insert("target".to_string(), serde_json::json!(target));
                     payload.insert("finding".to_string(), serde_json::json!(finding_desc));
-                    payload.insert("recommendation".to_string(), serde_json::json!(recommendation));
+                    payload.insert(
+                        "recommendation".to_string(),
+                        serde_json::json!(recommendation),
+                    );
                     payload.insert("file".to_string(), serde_json::json!(affected_file));
                     payload.insert("severity".to_string(), serde_json::json!(severity.clone()));
-                    payload.insert("findings_count".to_string(), serde_json::json!(analysis.findings.len()));
+                    payload.insert(
+                        "findings_count".to_string(),
+                        serde_json::json!(analysis.findings.len()),
+                    );
                     payload.insert("findings".to_string(), serde_json::json!(analysis.findings));
-                    payload.insert("summary".to_string(), serde_json::json!(analysis.analysis_summary));
+                    payload.insert(
+                        "summary".to_string(),
+                        serde_json::json!(analysis.analysis_summary),
+                    );
                     payload.insert("raw_status".to_string(), serde_json::json!(analysis.status));
                     payload
                 },
-            ).await;
+            )
+            .await;
 
             CommandAck {
                 request_id,
@@ -161,18 +210,14 @@ pub async fn handle_command(
             println!("❌ {}", error_msg);
 
             // Reportar error a Cerebro
-            let _ = report_event(
-                config,
-                &format!("sentinel_{}_error", action),
-                "error",
-                {
-                    let mut payload = HashMap::new();
-                    payload.insert("action".to_string(), serde_json::json!(action));
-                    payload.insert("target".to_string(), serde_json::json!(target));
-                    payload.insert("error".to_string(), serde_json::json!(error_msg.clone()));
-                    payload
-                },
-            ).await;
+            let _ = report_event(config, &format!("sentinel_{}_error", action), "error", {
+                let mut payload = HashMap::new();
+                payload.insert("action".to_string(), serde_json::json!(action));
+                payload.insert("target".to_string(), serde_json::json!(target));
+                payload.insert("error".to_string(), serde_json::json!(error_msg.clone()));
+                payload
+            })
+            .await;
 
             CommandAck {
                 request_id,
@@ -201,26 +246,83 @@ async fn analyze_file(
 
     // Leer contenido del archivo
     let content = std::fs::read_to_string(file_path)?;
-    let file_name = file_path.file_name()
+    let file_name = file_path
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
     // Crear orquestador y ejecutar análisis
     let mut orchestrator = AgentOrchestrator::new();
-    orchestrator.register(std::sync::Arc::new(crate::agents::reviewer::ReviewerAgent::new()));
+    orchestrator.register(std::sync::Arc::new(
+        crate::agents::reviewer::ReviewerAgent::new(),
+    ));
 
     let task = Task {
         id: uuid::Uuid::new_v4().to_string(),
-        description: format!("Analiza este archivo en busca de problemas de calidad, seguridad y arquitectura: {}", file_name),
+        description: format!(
+            "Analiza este archivo en busca de problemas de calidad, seguridad y arquitectura: {}",
+            file_name
+        ),
         task_type: TaskType::Analyze,
         file_path: Some(file_path.to_path_buf()),
         context: Some(content.clone()),
     };
 
-    let result = orchestrator.execute_task("ReviewerAgent", &task, agent_context).await?;
+    let result = orchestrator
+        .execute_task("ReviewerAgent", &task, agent_context)
+        .await?;
 
     // Parsear resultados
-    let findings = parse_analysis_output(&result.output, target);
+    let mut findings = parse_analysis_output(&result.output, target);
+
+    // --- Ejecutar tests si existen (Alinear con el flujo del monitor) ---
+    let base_name = target.split('.').next().unwrap_or(target).to_string();
+    let project_root = &agent_context.project_root;
+    let test_rel_path = crate::files::buscar_archivo_test(
+        &base_name,
+        project_root,
+        &agent_context.config.test_patterns,
+    );
+
+    if let Some(test_path) = test_rel_path {
+        println!(
+            "🧪 [Sentinel Bridge] Ejecutando tests para {}: {}",
+            target, test_path
+        );
+
+        let _ = report_event(
+            &crate::agent_config::AgentConfig::from_env(),
+            "tests_starting",
+            "info",
+            {
+                let mut p = std::collections::HashMap::new();
+                p.insert("file".to_string(), serde_json::json!(target));
+                p.insert(
+                    "test_path".to_string(),
+                    serde_json::json!(test_path.clone()),
+                );
+                p
+            },
+        )
+        .await;
+
+        match crate::tests::ejecutar_tests(&test_path, project_root, &agent_context.config) {
+            Ok(_) => {
+                println!("   ✅ Tests pasaron.");
+            }
+            Err(e) => {
+                println!("   ❌ Tests fallaron: {}", e);
+                findings.push(Finding {
+                    file: target.to_string(),
+                    line: None,
+                    message: format!("Tests fallidos: {}", e),
+                    severity: "error".to_string(),
+                    rule: Some("unit-tests".to_string()),
+                    recommendation: Some("Corregir la lógica para que pasen los tests o actualizar los tests si el cambio es intencional.".to_string()),
+                });
+            }
+        }
+    }
 
     // Determinar severidad
     let severity = if findings.iter().any(|f| f.severity == "critical") {
@@ -231,7 +333,10 @@ async fn analyze_file(
         "warning"
     } else {
         "info"
-    }.to_string();
+    }
+    .to_string();
+
+    let findings_count = findings.len();
 
     Ok(AnalysisResult {
         action: "analyze".to_string(),
@@ -239,7 +344,10 @@ async fn analyze_file(
         status: "success".to_string(),
         findings,
         raw_output: result.output.clone(),
-        analysis_summary: result.output.lines().take(5).collect::<Vec<_>>().join("\n"),
+        analysis_summary: format!(
+            "Análisis completado con {} hallazgos (IA + Tests)",
+            findings_count
+        ),
         severity,
     })
 }
@@ -264,8 +372,7 @@ async fn audit_project(
     let project_path = std::path::PathBuf::from(target);
 
     // Cargar configuración y ejecutar auditoría
-    let config_sentinel = crate::config::SentinelConfig::load(&project_path)
-        .unwrap_or_default();
+    let config_sentinel = crate::config::SentinelConfig::load(&project_path).unwrap_or_default();
 
     let mut findings = Vec::new();
 
@@ -286,9 +393,9 @@ async fn audit_project(
         action: "audit".to_string(),
         target: target.to_string(),
         status: "success".to_string(),
-        findings,
         raw_output: "Auditoría completada".to_string(),
         analysis_summary: format!("Auditoría de proyecto: {} hallazgos", findings.len()),
+        findings,
         severity: "info".to_string(),
     })
 }
@@ -303,7 +410,9 @@ async fn review_architecture(
 
     // Crear orquestador con reviewer
     let mut orchestrator = AgentOrchestrator::new();
-    orchestrator.register(std::sync::Arc::new(crate::agents::reviewer::ReviewerAgent::new()));
+    orchestrator.register(std::sync::Arc::new(
+        crate::agents::reviewer::ReviewerAgent::new(),
+    ));
 
     // Construir tarea de revisión arquitectónica
     let task = Task {
@@ -314,7 +423,9 @@ async fn review_architecture(
         context: Some(format!("Proyecto: {}", target)),
     };
 
-    let result = orchestrator.execute_task("ReviewerAgent", &task, agent_context).await?;
+    let result = orchestrator
+        .execute_task("ReviewerAgent", &task, agent_context)
+        .await?;
 
     // Parsear sugerencias del resultado
     let suggestions = crate::ai::utils::extraer_json_sugerencias(&result.output);
@@ -328,7 +439,8 @@ async fn review_architecture(
                     file: target.to_string(),
                     line: None,
                     message: title.to_string(),
-                    severity: sug.get("impact")
+                    severity: sug
+                        .get("impact")
                         .and_then(|i| i.as_str())
                         .map(|s| match s.to_lowercase().as_str() {
                             "high" | "critical" => "critical",
@@ -338,7 +450,10 @@ async fn review_architecture(
                         .unwrap_or("warning")
                         .to_string(),
                     rule: Some("architectural".to_string()),
-                    recommendation: sug.get("description").and_then(|d| d.as_str()).map(|s| s.to_string()),
+                    recommendation: sug
+                        .get("description")
+                        .and_then(|d| d.as_str())
+                        .map(|s| s.to_string()),
                 });
             }
         }
@@ -348,14 +463,19 @@ async fn review_architecture(
         action: "review".to_string(),
         target: target.to_string(),
         status: "success".to_string(),
-        findings,
         raw_output: result.output.clone(),
-        analysis_summary: result.output.lines().take(10).collect::<Vec<_>>().join("\n"),
+        analysis_summary: result
+            .output
+            .lines()
+            .take(10)
+            .collect::<Vec<_>>()
+            .join("\n"),
         severity: if findings.iter().any(|f| f.severity == "critical") {
             "critical".to_string()
         } else {
             "warning".to_string()
         },
+        findings,
     })
 }
 
@@ -374,8 +494,7 @@ async fn get_status(
         raw_output: serde_json::to_string_pretty(&stats)?,
         analysis_summary: format!(
             "Sentinel v5.0.0 | Bugs evitados: {} | Tiempo ahorrado: {} mins",
-            stats.bugs_criticos_evitados,
-            stats.tiempo_estimado_ahorrado_mins
+            stats.bugs_criticos_evitados, stats.tiempo_estimado_ahorrado_mins
         ),
         severity: "info".to_string(),
     })
