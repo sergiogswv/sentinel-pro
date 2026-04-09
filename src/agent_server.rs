@@ -199,13 +199,25 @@ async fn http_handle_command(
 
         // Comandos del Monitor remotos
         "monitor/pause" => {
-            // Alternar estado de pausa (no hay estado global, solo señal)
-            println!("⏸️ Pausa/Reanudación del monitoreo solicitada");
+            println!("⏸️ Pausando monitoreo...");
+            crate::commands::monitor::PAUSE_SIGNAL.store(true, std::sync::atomic::Ordering::SeqCst);
             Json(CommandAck {
                 request_id: cmd.request_id,
                 status: "completed".to_string(),
                 result: Some(serde_json::json!({
-                    "message": "Comando de pausa enviado (requiere reinicio de monitor para aplicar)"
+                    "message": "Monitoreo pausado exitosamente"
+                })),
+                error: None,
+            })
+        }
+        "monitor/resume" => {
+            println!("▶️ Reanudando monitoreo...");
+            crate::commands::monitor::PAUSE_SIGNAL.store(false, std::sync::atomic::Ordering::SeqCst);
+            Json(CommandAck {
+                request_id: cmd.request_id,
+                status: "completed".to_string(),
+                result: Some(serde_json::json!({
+                    "message": "Monitoreo reanudado exitosamente"
                 })),
                 error: None,
             })

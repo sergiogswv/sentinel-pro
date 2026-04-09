@@ -12,3 +12,8 @@ errors.txt
 __pycache__/
 *.py[cod]
 *.class
+
+# Environment variables
+.env
+.env.*
+!.env.example

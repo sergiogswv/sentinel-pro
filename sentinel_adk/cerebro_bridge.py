@@ -182,6 +182,8 @@ async def handle_command(
                 "finding": f"Análisis {actual_action}: {raw.get('error', 'Completado')}",
                 "recommendation": str(raw.get("result", "Verificar resultado")),
                 "issues_count": 0,
+                "task_type": "info",
+                "task_priority": "low"
             }
         )
         return {

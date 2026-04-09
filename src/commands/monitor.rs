@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use chrono::Local;
 
 pub static STOP_SIGNAL: AtomicBool = AtomicBool::new(false);
+pub static PAUSE_SIGNAL: AtomicBool = AtomicBool::new(false);
 
 fn report_sync(event_type: &str, severity: &str, mut payload: HashMap<String, serde_json::Value>) {
     let agent_config = crate::agent_config::AgentConfig::from_env();
@@ -564,24 +565,20 @@ pub fn start_monitor(project: Option<String>, auto_mode: bool) {
         thread::sleep(std::time::Duration::from_millis(500));
 
         // Si estamos pausados, descartar este evento y todos acumulados
-        if *pausa_loop.lock().unwrap() {
+        if PAUSE_SIGNAL.load(Ordering::SeqCst) {
             // Descartar todos los eventos acumulados
             let mut dropped = 0;
             while let Ok(_) = rx.try_recv() {
                 dropped += 1;
             }
-            if std::env::var("VERBOSE").is_ok() {
-                println!("   [DEBUG] Pausa activa: descartado evento de {} + {} acumulados", changed_path.display(), dropped);
-            }
+            println!("   ⏸️  Monitor pausado: descartado evento de {} + {} acumulados", changed_path.display(), dropped);
             was_paused = true;
             continue;
         }
 
         // Si se acaba de reanudar después de pausa, descartar TODO incluyendo este evento
         if was_paused {
-            if std::env::var("VERBOSE").is_ok() {
-                println!("   [DEBUG] Monitor reanudado: descartando evento rezagado de {}", changed_path.display());
-            }
+            println!("   ▶️  Monitor reanudado: descartando eventos rezagados");
             // Limpiar toda la cola
             while let Ok(_) = rx.try_recv() {}
             was_paused = false;
