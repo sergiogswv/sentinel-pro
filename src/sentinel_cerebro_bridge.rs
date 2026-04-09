@@ -1,5 +1,4 @@
-use crate::agent_config::AgentConfig;
-use crate::agent_models::{AgentEvent, CommandAck, OrchestratorCommand};
+use crate::agent_models::{CommandAck, OrchestratorCommand};
 use crate::agent_reporter::report_event;
 use crate::agents::base::{AgentContext, Task, TaskType};
 use crate::agents::orchestrator::AgentOrchestrator;
@@ -53,9 +52,14 @@ pub async fn handle_command(
     let action = cmd.action.clone();
     let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
 
+    // Extraer auto_mode de options (viene de Cerebro cuando auto_fix_enabled=true)
+    let auto_mode = cmd.options.get("auto")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     println!(
-        "📡 [Sentinel Bridge] Comando recibido: action='{}' target='{}'",
-        action, target
+        "📡 [Sentinel Bridge] Comando recibido: action='{}' target='{}' auto_mode={}",
+        action, target, auto_mode
     );
 
     // Emitir evento de inicio
@@ -73,10 +77,10 @@ pub async fn handle_command(
 
     // Ejecutar acción correspondiente
     let result = match action.as_str() {
-        "analyze" => analyze_file(&target, agent_context, config).await,
-        "check" => check_file(&target, agent_context, config).await,
-        "audit" => audit_project(&target, agent_context, config).await,
-        "review" => review_architecture(&target, agent_context, config).await,
+        "analyze" => analyze_file(&target, agent_context, config, auto_mode).await,
+        "check" => check_file(&target, agent_context, config, auto_mode).await,
+        "audit" => audit_project(&target, agent_context, config, auto_mode).await,
+        "review" => review_architecture(&target, agent_context, config, auto_mode).await,
         "status" => get_status(agent_context, config).await,
         "clean-cache" => {
             crate::commands::pro::handle_clean_cache(
@@ -233,7 +237,8 @@ pub async fn handle_command(
 async fn analyze_file(
     target: &str,
     agent_context: &AgentContext,
-    config: &AgentConfig,
+    _config: &AgentConfig,
+    _auto_mode: bool,
 ) -> anyhow::Result<AnalysisResult> {
     use std::path::Path;
 
@@ -357,22 +362,24 @@ async fn check_file(
     target: &str,
     agent_context: &AgentContext,
     config: &AgentConfig,
+    auto_mode: bool,
 ) -> anyhow::Result<AnalysisResult> {
     // Por ahora, es similar a analyze pero más enfocado en calidad rápida
-    analyze_file(target, agent_context, config).await
+    analyze_file(target, agent_context, config, auto_mode).await
 }
 
 /// Auditoría de proyecto completo
 async fn audit_project(
     target: &str,
-    agent_context: &AgentContext,
-    config: &AgentConfig,
+    _agent_context: &AgentContext,
+    _config: &AgentConfig,
+    _auto_mode: bool,
 ) -> anyhow::Result<AnalysisResult> {
     // Ejecutar auditoría usando el motor de reglas existente
     let project_path = std::path::PathBuf::from(target);
 
     // Cargar configuración y ejecutar auditoría
-    let config_sentinel = crate::config::SentinelConfig::load(&project_path).unwrap_or_default();
+    let _config_sentinel = crate::config::SentinelConfig::load(&project_path).unwrap_or_default();
 
     let mut findings = Vec::new();
 
@@ -403,8 +410,9 @@ async fn audit_project(
 /// Revisión de arquitectura completa
 async fn review_architecture(
     target: &str,
-    agent_context: &AgentContext,
-    config: &AgentConfig,
+    _agent_context: &AgentContext,
+    _config: &AgentConfig,
+    _auto_mode: bool,
 ) -> anyhow::Result<AnalysisResult> {
     let project_path = std::path::PathBuf::from(target);
 
@@ -433,7 +441,7 @@ async fn review_architecture(
 
     // Intentar parsear JSON de sugerencias
     if let Ok(suggestions_json) = serde_json::from_str::<Vec<serde_json::Value>>(&suggestions) {
-        for (i, sug) in suggestions_json.iter().enumerate() {
+        for (_i, sug) in suggestions_json.iter().enumerate() {
             if let Some(title) = sug.get("title").and_then(|t| t.as_str()) {
                 findings.push(Finding {
                     file: target.to_string(),
@@ -482,7 +490,7 @@ async fn review_architecture(
 /// Obtiene estado del agente Sentinel
 async fn get_status(
     agent_context: &AgentContext,
-    config: &AgentConfig,
+    _config: &AgentConfig,
 ) -> anyhow::Result<AnalysisResult> {
     let stats = crate::stats::SentinelStats::cargar(&agent_context.project_root);
 

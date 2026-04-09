@@ -151,15 +151,43 @@ pub fn detectar_framework_con_ia(
 
 /// Parsea la respuesta JSON de la IA con la detección del framework
 fn parsear_deteccion_framework(respuesta: &str) -> anyhow::Result<FrameworkDetection> {
-    // Extraer JSON si está envuelto en texto
-    let json_str = if let Some(inicio) = respuesta.find('{') {
-        if let Some(fin) = respuesta.rfind('}') {
-            &respuesta[inicio..=fin]
+    println!("   🔍 [DEBUG-SENTINEL-V3] Procesando respuesta de IA (longitud: {})", respuesta.len());
+    if respuesta.len() < 500 {
+        println!("   🔍 [DEBUG-SENTINEL-V3] Contenido RAW: {}", respuesta.blue());
+    }
+
+    // 1. Limpiar posibles bloques de código markdown
+    let clean_resp = respuesta
+        .replace("```json", "")
+        .replace("```", "")
+        .trim()
+        .to_string();
+
+    // 2. Intentar encontrar el inicio real del JSON
+    let mut inicio_idx = clean_resp.find('{');
+    while let Some(pos) = inicio_idx {
+        let snippet = &clean_resp[pos..];
+        if snippet.starts_with("{\"") || snippet.starts_with("{ \"") || snippet.starts_with("{\n") || snippet.starts_with("{\r") {
+            inicio_idx = Some(pos);
+            break;
+        }
+        // Buscar el siguiente '{'
+        if pos + 1 < clean_resp.len() {
+            inicio_idx = clean_resp[pos + 1..].find('{').map(|n| pos + 1 + n);
         } else {
-            respuesta
+            inicio_idx = None;
+            break;
+        }
+    }
+
+    let json_str = if let Some(inicio) = inicio_idx {
+        if let Some(fin) = clean_resp.rfind('}') {
+            &clean_resp[inicio..=fin]
+        } else {
+            &clean_resp
         }
     } else {
-        respuesta
+        &clean_resp
     };
 
     match serde_json::from_str::<FrameworkDetection>(json_str) {
@@ -173,6 +201,7 @@ fn parsear_deteccion_framework(respuesta: &str) -> anyhow::Result<FrameworkDetec
                 "   ⚠️  Error al parsear respuesta de IA: {}",
                 e.to_string().yellow()
             );
+            println!("   ℹ️  JSON extraído: {}", json_str.dimmed());
             println!("   ℹ️  Usando configuración genérica. Edita .sentinelrc.toml después.");
             Ok(FrameworkDetection {
                 framework: "Generic".to_string(),

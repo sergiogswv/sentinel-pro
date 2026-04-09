@@ -3,6 +3,33 @@ use anyhow::Result;
 use reqwest::blocking::Client;
 use serde_json::json;
 
+/// Strip <thought>...</thought> blocks from Gemma model responses
+/// Gemma returns internal reasoning wrapped in XML tags that should be filtered out
+fn strip_thought_blocks(text: &str) -> String {
+    let mut result = String::new();
+    let mut in_thought = false;
+    let mut i = 0;
+    let chars: Vec<char> = text.chars().collect();
+
+    while i < chars.len() {
+        let remaining = &chars[i..];
+        if !in_thought && remaining.starts_with(&['<', 't', 'h', 'o', 'u', 'g', 'h', 't', '>']) {
+            in_thought = true;
+            i += 9;
+        } else if in_thought && remaining.starts_with(&['<', '/', 't', 'h', 'o', 'u', 'g', 'h', 't', '>']) {
+            in_thought = false;
+            i += 10;
+        } else if !in_thought {
+            result.push(chars[i]);
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    result.trim().to_string()
+}
+
 pub struct OpenAiCompatProvider {
     api_key: String,
     url: String,
@@ -47,15 +74,43 @@ impl super::AiProvider for OpenAiCompatProvider {
         }
 
         let body: serde_json::Value = serde_json::from_str(&body_text)?;
-        body["choices"][0]["message"]["content"]
+        
+        // 1. Intentar formato estándar OpenAI
+        let text = body["choices"][0]["message"]["content"]
             .as_str()
             .map(|s| s.to_string())
+            .or_else(|| {
+                // 2. Fallback: ¿Es formato Google Gemini/Gemma?
+                let empty_vec = vec![];
+                let parts = body["candidates"][0]["content"]["parts"].as_array().unwrap_or(&empty_vec);
+                
+                let mut combined_text = String::new();
+                for part in parts {
+                    // Ignorar bloques de pensamiento
+                    if part["thought"].as_bool().unwrap_or(false) {
+                        continue;
+                    }
+                    if let Some(part_text) = part["text"].as_str() {
+                        combined_text.push_str(part_text);
+                    }
+                }
+                
+                if combined_text.is_empty() {
+                    None
+                } else {
+                    Some(combined_text)
+                }
+            })
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Estructura de OpenAI-Compat inesperada. Body: {}",
+                    "Estructura de respuesta inesperada (no se encontró 'choices' ni 'candidates'). Body: {}",
                     body_text
                 )
-            })
+            })?;
+
+        // Strip <thought> blocks from Gemma models (OpenAI-compatible endpoint)
+        let text_clean = strip_thought_blocks(&text);
+        Ok(text_clean)
     }
 
     fn embed(&self, client: &Client, texts: Vec<String>, model_name: &str) -> Result<Vec<Vec<f32>>> {

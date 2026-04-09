@@ -152,11 +152,11 @@ fn show_precommit_status(hook_file: &Path) {
             println!("{}", "Pre-commit hook: ✅ Installed".green());
 
             // Check if executable
-            if let Ok(metadata) = fs::metadata(hook_file) {
+            if let Ok(_metadata) = fs::metadata(hook_file) {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    let perms = metadata.permissions();
+                    let perms = _metadata.permissions();
                     let mode = perms.mode();
                     if mode & 0o111 != 0 {
                         println!("  Status: Executable");

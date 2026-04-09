@@ -148,30 +148,30 @@ async def execute_clean_cache(target: str = ".") -> tuple[dict, int]:
 # Acciones de Monitor
 # ──────────────────────────────────────────────
 
-async def execute_monitor_pause(target: str = ".") -> tuple[dict, int]:
+async def execute_monitor_pause(target: str = ".", options: Optional[dict] = None) -> tuple[dict, int]:
     """Pausa/reanuda monitoreo. Retorna (raw_result, memory_id)."""
-    result = await call_core("monitor/pause", target=target)
+    result = await call_core("monitor/pause", target=target, options=options)
     mid = await memory.save_finding("monitor_pause", "info", result, target)
     return result, mid
 
 
-async def execute_monitor_daily_report(target: str = ".") -> tuple[dict, int]:
+async def execute_monitor_daily_report(target: str = ".", options: Optional[dict] = None) -> tuple[dict, int]:
     """Reporte diario de productividad. Retorna (raw_result, memory_id)."""
-    result = await call_core("monitor/daily-report", target=target)
+    result = await call_core("monitor/daily-report", target=target, options=options)
     mid = await memory.save_finding("daily_report_completed", "info", result, target)
     return result, mid
 
 
-async def execute_monitor_metrics(target: str = ".") -> tuple[dict, int]:
+async def execute_monitor_metrics(target: str = ".", options: Optional[dict] = None) -> tuple[dict, int]:
     """Métricas de Sentinel. Retorna (raw_result, memory_id)."""
-    result = await call_core("monitor/metrics", target=target)
+    result = await call_core("monitor/metrics", target=target, options=options)
     mid = await memory.save_finding("metrics", "info", result, target)
     return result, mid
 
 
-async def execute_monitor_testing(target: str = ".") -> tuple[dict, int]:
+async def execute_monitor_testing(target: str = ".", options: Optional[dict] = None) -> tuple[dict, int]:
     """Sugerencias de testing. Retorna (raw_result, memory_id)."""
-    result = await call_core("monitor/testing", target=target)
+    result = await call_core("monitor/testing", target=target, options=options)
     mid = await memory.save_finding("testing_suggestions", "info", result, target)
     return result, mid
 

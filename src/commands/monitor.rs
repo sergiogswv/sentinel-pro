@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Instant;
 use std::sync::atomic::{AtomicBool, Ordering};
+use chrono::Local;
 
 pub static STOP_SIGNAL: AtomicBool = AtomicBool::new(false);
 
@@ -44,7 +45,7 @@ pub(crate) fn read_pid_file(pid_path: &Path) -> Option<u32> {
         .and_then(|s| s.trim().parse::<u32>().ok())
 }
 
-pub(crate) fn is_process_alive(pid: u32) -> bool {
+pub(crate) fn is_process_alive(_pid: u32) -> bool {
     #[cfg(unix)]
     {
         use nix::sys::signal;
@@ -75,13 +76,19 @@ pub fn handle_daemon(project_root: &Path) -> anyhow::Result<()> {
         // Stale PID file (process dead): write_pid_file below will overwrite it.
     }
 
+    // Crear archivos de log
+    let sentinel_dir = project_root.join(".sentinel");
+    std::fs::create_dir_all(&sentinel_dir)?;
+    let stdout_log = std::fs::File::create(sentinel_dir.join("monitor.stdout.log"))?;
+    let stderr_log = std::fs::File::create(sentinel_dir.join("monitor.stderr.log"))?;
+
     let exe = std::env::current_exe()?;
     let mut command = std::process::Command::new(exe);
     command
         .arg("monitor")
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+        .stdout(stdout_log)
+        .stderr(stderr_log);
 
     // Detach from the controlling terminal on Unix: create a new session so
     // the daemon does not receive SIGHUP when the parent terminal closes.
@@ -247,6 +254,8 @@ pub fn is_file_excluded(project_root: &Path, file_path: &Path) -> bool {
 }
 
 pub fn start_monitor(project: Option<String>, auto_mode: bool) {
+    eprintln!("[DEBUG] start_monitor llamado con project: {:?}, auto_mode: {}", project, auto_mode);
+
     // Mostrar banner al inicio
     ui::mostrar_banner();
 
@@ -464,7 +473,7 @@ pub fn start_monitor(project: Option<String>, auto_mode: bool) {
         .unwrap();
 
     let pausa_leer = Arc::clone(&pausa_loop);
-    let leer_respuesta = move || -> Option<String> {
+    let _leer_respuesta = move || -> Option<String> {
         *esperando_input.lock().unwrap() = true;
 
         // Pausar el monitor mientras se espera input del usuario
@@ -535,7 +544,7 @@ pub fn start_monitor(project: Option<String>, auto_mode: bool) {
     // Reiniciar señal de stop por si venimos de un reinicio
     STOP_SIGNAL.store(false, Ordering::SeqCst);
 
-    let mut ultimo_cambio: HashMap<PathBuf, Instant> = HashMap::new();
+    let ultimo_cambio: HashMap<PathBuf, Instant> = HashMap::new();
     let mut was_paused = false;
 
     while !STOP_SIGNAL.load(Ordering::SeqCst) {
@@ -608,26 +617,73 @@ pub fn start_monitor(project: Option<String>, auto_mode: bool) {
 
         // --- Reportar al Cerebro (Modo Agente) ---
         let agent_config = crate::agent_config::AgentConfig::from_env();
+
+        // Log a archivo para debuggear en modo daemon
+        let log_file = project_path.join(".sentinel/monitor.log");
+        let log_msg = format!("[{}] Cambio detectado: {} | report_enabled={} | cerebro_url={}\n",
+            Local::now().format("%Y-%m-%d %H:%M:%S"),
+            changed_path.display(),
+            agent_config.report_enabled,
+            agent_config.cerebro_url
+        );
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_file)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, log_msg.as_bytes()));
+
         if agent_config.report_enabled {
             println!("📡 Reportando evento a Cerebro...");
             let mut payload = std::collections::HashMap::new();
             payload.insert("file".to_string(), serde_json::Value::String(changed_path.to_string_lossy().to_string()));
             payload.insert("message".to_string(), serde_json::Value::String(format!("Archivo modificado: {}", file_name)));
-            
+
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .unwrap();
-            
+
             match rt.block_on(crate::agent_reporter::report_event(
                 &agent_config,
                 "file_change",
-                "warning", 
+                "warning",
                 payload
             )) {
-                Ok(_) => println!("   ✅ Evento reportado con éxito."),
-                Err(e) => eprintln!("   ❌ Error al reportar evento: {}", e),
+                Ok(_) => {
+                    println!("   ✅ Evento reportado con éxito.");
+                    // Log exito
+                    let success_msg = format!("[{}] ✅ Evento reportado exitosamente a Cerebro\n",
+                        Local::now().format("%Y-%m-%d %H:%M:%S")
+                    );
+                    let _ = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&log_file)
+                        .and_then(|mut f| std::io::Write::write_all(&mut f, success_msg.as_bytes()));
+                }
+                Err(e) => {
+                    eprintln!("   ❌ Error al reportar evento: {}", e);
+                    // Log error
+                    let error_msg = format!("[{}] ❌ Error reportando a Cerebro: {}\n",
+                        Local::now().format("%Y-%m-%d %H:%M:%S"), e
+                    );
+                    let _ = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&log_file)
+                        .and_then(|mut f| std::io::Write::write_all(&mut f, error_msg.as_bytes()));
+                }
             }
+        } else {
+            // Log que report está deshabilitado
+            let disabled_msg = format!("[{}] ⚠️ Reporte deshabilitado - evento no enviado\n",
+                Local::now().format("%Y-%m-%d %H:%M:%S")
+            );
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_file)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, disabled_msg.as_bytes()));
         }
 
         // --- Actualizar Índice de Símbolos (SQLite) ---
@@ -684,16 +740,22 @@ pub fn start_monitor(project: Option<String>, auto_mode: bool) {
             files::buscar_archivo_test(&base_name, &project_path, &config.test_patterns);
 
         if test_rel_path.is_none() {
-            println!("\n🔔 CAMBIO EN: {}", file_name.cyan().bold());
+            let auto_label = if auto_mode_active { "[AUTONOMOUS]".green().bold() } else { "[INTERACTIVE]".yellow() };
+            println!("\n{} 🔔 CAMBIO EN: {}", auto_label, file_name.cyan().bold());
             println!(
                 "{}",
                 "⚠️  No se encontraron tests para este archivo.".yellow()
             );
             
-            let query_text = format!("Sentinel: No hay tests para {}. ¿Deseas que revise el código de todas formas? (s/n)", file_name);
-            let run_full_analysis = auto_mode_active || match remote_prompt(&query_text) {
-                Some(respuesta) if respuesta == "s" => true,
-                _ => false,
+            let run_full_analysis = if auto_mode_active {
+                println!("   🤖 Modo autónomo: Procediendo con análisis sin tests automáticamente.");
+                true
+            } else {
+                let query_text = format!("Sentinel: No hay tests para {}. ¿Deseas que revise el código de todas formas? (s/n)", file_name);
+                match remote_prompt(&query_text) {
+                    Some(respuesta) if respuesta == "s" => true,
+                    _ => false,
+                }
             };
 
             if run_full_analysis {
@@ -857,7 +919,9 @@ pub fn start_monitor(project: Option<String>, auto_mode: bool) {
                                         ]));
 
                                         let query_help = format!("Sentinel: Tests fallaron para {}. ¿Deseas ayuda de la IA para corregirlo? (s/n)", file_name);
-                                        if remote_prompt(&query_help).as_deref() == Some("s") {
+                                        let pedir_ayuda = if auto_mode_active { false } else { remote_prompt(&query_help).as_deref() == Some("s") };
+                                        
+                                        if pedir_ayuda {
                                             let _ = crate::tests::pedir_ayuda_test(&codigo, &test_path, &config, Arc::clone(&stats), &project_path);
                                         }
                                     }

@@ -47,20 +47,27 @@ async fn http_handle_command(
             let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
 
             println!("🔄 Reiniciando monitoreo sobre: {}", target);
+            eprintln!("[DEBUG] Comando monitor recibido - target: {}", target);
 
             // Indicar a hilos previos que se detengan
             crate::commands::monitor::STOP_SIGNAL.store(true, std::sync::atomic::Ordering::SeqCst);
+            eprintln!("[DEBUG] STOP_SIGNAL establecido a true");
 
             let auto_mode = cmd.options.get("auto")
                 .and_then(|v| v.as_bool())
                 .or_else(|| cmd.options.get("auto_mode").and_then(|v| v.as_bool()))
                 .unwrap_or(false);
 
+            eprintln!("[DEBUG] auto_mode: {}", auto_mode);
+
             // Lanzar el monitoreo en un hilo separado
             thread::spawn(move || {
+                eprintln!("[DEBUG] Hilo de monitoreo iniciado, esperando 1s...");
                 // Esperar un poco a que el hilo anterior se entere y libere recursos
                 thread::sleep(std::time::Duration::from_millis(1000));
+                eprintln!("[DEBUG] Llamando start_monitor...");
                 crate::commands::monitor::start_monitor(Some(target), auto_mode);
+                eprintln!("[DEBUG] start_monitor retornó");
             });
 
             Json(CommandAck {

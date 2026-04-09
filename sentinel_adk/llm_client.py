@@ -96,6 +96,7 @@ def _build_analysis_prompt(action: str, raw_result: dict, memory_context: Option
 # ──────────────────────────────────────────────
 
 async def _analyze_with_gemini(prompt: str) -> str:
+    """Gemini Flash/Pro usando la librería oficial de Google."""
     try:
         import google.generativeai as genai
         genai.configure(api_key=settings.google_api_key)
@@ -104,11 +105,94 @@ async def _analyze_with_gemini(prompt: str) -> str:
             system_instruction=SYSTEM_PROMPT,
         )
         response = await model.generate_content_async(prompt)
-        return response.text
+
+        # Handle 'thought' field in response (Gemma models via official library)
+        # Some models like gemma return internal reasoning as separate parts
+        text_content = None
+        if hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                parts = candidate.content.parts
+                # Find part that is NOT a thought
+                for part in parts:
+                    # Check if part has thought attribute (Gemma models)
+                    is_thought = getattr(part, 'thought', False)
+                    if not is_thought and hasattr(part, 'text'):
+                        text_content = part.text
+                        break
+
+        # Fallback to response.text if no filtered content found
+        if not text_content:
+            text_content = response.text
+
+        return text_content
     except ImportError:
         return "[Error] google-generativeai no instalado. Ejecuta: pip install google-generativeai"
     except Exception as exc:
         return f"[Error Gemini] {exc}"
+
+
+async def _analyze_with_gemini_open_source(prompt: str) -> str:
+    """
+    Gemma models using native Gemini API (not OpenAI-compatible).
+    Handles 'thought' field in response.
+
+    POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}
+    """
+    import httpx
+    import json
+
+    api_key = settings.google_api_key
+    model = settings.gemini_model  # e.g., "gemma-4-31b-it"
+
+    # Default base URL for Google AI API
+    base_url = getattr(settings, 'google_api_base_url', 'https://generativelanguage.googleapis.com')
+    url = f"{base_url.rstrip('/')}/v1beta/models/{model}:generateContent?key={api_key}"
+
+    headers = {"content-type": "application/json"}
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            resp = await client.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Handle response with 'thought' field (Gemma models)
+            # Response has multiple parts: first may be thought, second is actual text
+            parts = data["candidates"][0]["content"]["parts"]
+
+            # Find the part that is NOT a thought (the actual response)
+            text_content = None
+            for part in parts:
+                if isinstance(part, dict) and not part.get("thought", False):
+                    text_content = part.get("text")
+                    break
+
+            # Fallback: if all parts have thought or no text found, use last part
+            if not text_content and parts:
+                last_part = parts[-1]
+                if isinstance(last_part, dict):
+                    text_content = last_part.get("text", "")
+
+            # Strip <thought> blocks from Gemma models (when thought is in text content)
+            # Gemma sometimes returns internal reasoning wrapped in <thought>...</thought> XML tags
+            import re
+            if text_content:
+                text_content = re.sub(r'<thought>.*?</thought>', '', text_content, flags=re.DOTALL)
+                text_content = text_content.strip()
+
+            return text_content
+
+    except httpx.ConnectError as exc:
+        return f"[Error Gemma] No hay conexión: {exc}"
+    except httpx.HTTPStatusError as exc:
+        return f"[Error Gemma] HTTP {exc.response.status_code}: {exc.response.text[:200]}"
+    except Exception as exc:
+        return f"[Error Gemma] {exc}"
 
 
 async def _analyze_with_claude(prompt: str) -> str:
@@ -140,7 +224,17 @@ async def _analyze_with_openai(prompt: str) -> str:
             ],
             max_tokens=1024,
         )
-        return response.choices[0].message.content or ""
+        content = response.choices[0].message.content or ""
+
+        # Strip <thought> blocks from Gemma models accessed via OpenAI-compatible endpoint
+        # Gemma returns internal reasoning wrapped in <thought>...</thought> XML tags
+        import re
+        # Remove <thought>...</thought> blocks (multiline, non-greedy)
+        content = re.sub(r'<thought>.*?</thought>', '', content, flags=re.DOTALL)
+        # Clean up any extra whitespace left behind
+        content = content.strip()
+
+        return content
     except ImportError:
         return "[Error] openai no instalado. Ejecuta: pip install openai"
     except Exception as exc:
@@ -208,6 +302,8 @@ async def analyze_result(
 
     if provider == "gemini":
         return await _analyze_with_gemini(prompt)
+    elif provider == "gemini-open-source":
+        return await _analyze_with_gemini_open_source(prompt)
     elif provider == "claude":
         return await _analyze_with_claude(prompt)
     elif provider == "openai":

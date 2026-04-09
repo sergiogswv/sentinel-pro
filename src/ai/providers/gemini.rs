@@ -3,6 +3,33 @@ use anyhow::Result;
 use reqwest::blocking::Client;
 use serde_json::json;
 
+/// Strip <thought>...</thought> blocks from Gemma model responses
+/// Gemma returns internal reasoning wrapped in XML tags that should be filtered out
+fn strip_thought_blocks(text: &str) -> String {
+    let mut result = String::new();
+    let mut in_thought = false;
+    let mut i = 0;
+    let chars: Vec<char> = text.chars().collect();
+
+    while i < chars.len() {
+        let remaining = &chars[i..];
+        if !in_thought && remaining.starts_with(&['<', 't', 'h', 'o', 'u', 'g', 'h', 't', '>']) {
+            in_thought = true;
+            i += 9;
+        } else if in_thought && remaining.starts_with(&['<', '/', 't', 'h', 'o', 'u', 'g', 'h', 't', '>']) {
+            in_thought = false;
+            i += 10;
+        } else if !in_thought {
+            result.push(chars[i]);
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    result.trim().to_string()
+}
+
 /// Soporta dos APIs de Google:
 /// - Content API (use_interactions = false): generateContent
 /// - Interactions API (use_interactions = true): endpoint diferente
@@ -47,24 +74,49 @@ impl super::AiProvider for GeminiProvider {
             }
 
             let body: serde_json::Value = serde_json::from_str(&body_text)?;
-            body["output"]
+            let text = body["output"]
                 .as_str()
+                .map(|s| s.to_string())
                 .or_else(|| {
                     body["outputs"].as_array().and_then(|outputs| {
                         outputs
                             .iter()
                             .find(|o| o["type"] == "text")
                             .and_then(|o| o["text"].as_str())
+                            .map(|s| s.to_string())
                     })
                 })
-                .or_else(|| body["candidates"][0]["content"]["parts"][0]["text"].as_str())
-                .map(|s| s.to_string())
+                .or_else(|| {
+                    // Si no hay output directo, buscamos en candidates
+                    let empty_vec = vec![];
+                    let parts = body["candidates"][0]["content"]["parts"].as_array().unwrap_or(&empty_vec);
+                    
+                    let mut t = String::new();
+                    for part in parts {
+                        if part["thought"].as_bool().unwrap_or(false) {
+                            continue;
+                        }
+                        if let Some(part_text) = part["text"].as_str() {
+                            t.push_str(part_text);
+                        }
+                    }
+                    
+                    if t.is_empty() {
+                        None
+                    } else {
+                        Some(t)
+                    }
+                })
                 .ok_or_else(|| {
                     anyhow::anyhow!(
                         "No se pudo encontrar texto en respuesta de Gemini Interactions. Body: {}",
                         body_text
                     )
-                })
+                })?;
+
+            // Strip <thought> blocks from Gemma models
+            let text_clean = strip_thought_blocks(&text);
+            Ok(text_clean)
         } else {
             let url = if self.url.contains("generateContent") {
                 self.url.clone()
@@ -97,12 +149,38 @@ impl super::AiProvider for GeminiProvider {
             }
 
             let body: serde_json::Value = serde_json::from_str(&body_text)?;
-            body["candidates"][0]["content"]["parts"][0]["text"]
-                .as_str()
-                .map(|s| s.to_string())
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Estructura de Gemini inesperada. Body: {}", body_text)
-                })
+            
+            // Extraer todas las partes que no sean "thoughts"
+            let empty_vec = vec![];
+            let parts = body["candidates"][0]["content"]["parts"].as_array().unwrap_or(&empty_vec);
+            
+            let mut text = String::new();
+            for part in parts {
+                // Si la parte tiene "thought": true, la ignoramos
+                if part["thought"].as_bool().unwrap_or(false) {
+                    continue;
+                }
+                
+                if let Some(part_text) = part["text"].as_str() {
+                    text.push_str(part_text);
+                }
+            }
+
+            if text.is_empty() {
+                // Fallback a la primera parte si no encontramos nada (comportamiento anterior)
+                text = body["candidates"][0]["content"]["parts"][0]["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+            }
+
+            if text.is_empty() {
+                return Err(anyhow::anyhow!("Estructura de Gemini inesperada. Body: {}", body_text));
+            }
+
+            // Strip <thought> blocks from Gemma models (just in case they are still in the text)
+            let text_clean = strip_thought_blocks(&text);
+            Ok(text_clean)
         }
     }
 

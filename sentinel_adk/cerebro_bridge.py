@@ -21,6 +21,7 @@ CONTRATO MANTENIDO:
 
 import uuid
 import httpx
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -29,13 +30,22 @@ from . import memory
 from .tools import ACTION_MAP, call_core
 from .llm_client import analyze_result
 
+logger = logging.getLogger('sentinel_adk')
+
 
 # ──────────────────────────────────────────────
 # Reporte al Cerebro
 # ──────────────────────────────────────────────
 
-async def report_to_cerebro(event_type: str, severity: str, payload: dict):
-    """Envía un AgentEvent al endpoint POST /api/events del Cerebro."""
+async def report_to_cerebro(event_type: str, severity: str, payload: dict, max_retries: int = 3) -> bool:
+    """
+    Envía un AgentEvent al endpoint POST /api/events del Cerebro.
+
+    Incluye reintentos con backoff exponencial para garantizar entrega.
+    Retorna True si el evento fue entregado exitosamente.
+    """
+    import asyncio
+
     event = {
         "id": str(uuid.uuid4()),
         "source": "sentinel",
@@ -44,15 +54,38 @@ async def report_to_cerebro(event_type: str, severity: str, payload: dict):
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "payload": payload,
     }
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(f"{settings.cerebro_url}/api/events", json=event)
-            if resp.status_code >= 400:
-                print(f"⚠️  [Cerebro] Respuesta inesperada: {resp.status_code}")
-            else:
-                print(f"✅ [Cerebro] Evento reportado: {event_type} ({severity})")
-    except Exception as exc:
-        print(f"⚠️  [Cerebro] No disponible: {exc}")
+
+    # Logging estructurado para debugging
+    logger.info(f"📤 [Cerebro] Enviando evento: {event_type} ({severity}) - ID: {event['id'][:8]}")
+
+    for attempt in range(max_retries):
+        try:
+            # Timeout aumentado de 5s a 20s para dar tiempo a Cerebro de procesar
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(f"{settings.cerebro_url}/api/events", json=event)
+
+                if resp.status_code == 200:
+                    logger.info(f"✅ [Cerebro] Evento entregado: {event_type} (attempt {attempt + 1})")
+                    print(f"✅ [Cerebro] Evento reportado: {event_type} ({severity})")
+                    return True
+                else:
+                    logger.warning(f"⚠️  [Cerebro] HTTP {resp.status_code}: {resp.text[:200]}")
+                    print(f"⚠️  [Cerebro] Respuesta inesperada: {resp.status_code}")
+
+        except httpx.TimeoutException:
+            logger.warning(f"⏱️  [Cerebro] Timeout (attempt {attempt + 1}/{max_retries})")
+        except Exception as exc:
+            logger.error(f"❌ [Cerebro] Error: {exc} (attempt {attempt + 1}/{max_retries})")
+            print(f"⚠️  [Cerebro] No disponible: {exc}")
+
+        # Backoff exponencial: 1s, 2s, 4s
+        if attempt < max_retries - 1:
+            wait_time = 2 ** attempt
+            logger.info(f"🔄 [Cerebro] Reintentando en {wait_time}s...")
+            await asyncio.sleep(wait_time)
+
+    logger.error(f"❌ [Cerebro] Falló entrega después de {max_retries} intentos: {event_type}")
+    return False
 
 
 # ──────────────────────────────────────────────
@@ -76,7 +109,9 @@ async def handle_command(
     """
     # Mapear el subcommand al action real
     actual_action = subcommand or action
-    print(f"🛡️ [Sentinel] Procesando: action='{action}' subcommand='{subcommand}' target='{target}'")
+    msg = f"🛡️ [Sentinel] Procesando: action='{action}' subcommand='{subcommand}' target='{target}' options={options}"
+    print(msg)
+    logger.info(msg)
 
     # ── 1. Status — no requiere Core ni LLM ──────────────────────────
     if actual_action == "status":
@@ -101,7 +136,33 @@ async def handle_command(
     # ── 2. Acciones de monitoreo (monitor/*) ───────────────────────────
     if actual_action.startswith("monitor/"):
         monitor_action = actual_action.split("/")[1]
-        return await _handle_monitor_command(monitor_action, target, request_id)
+        return await _handle_monitor_command(monitor_action, target, request_id, options)
+
+    # ── 2b. Comando monitor sin subcomando ────────────────────────────
+    # El modo ADK NO soporta monitoreo continuo de archivos (file watching).
+    # Eso solo lo hace el Core Rust. Reportamos que no está soportado.
+    if actual_action == "monitor":
+        logger.warning(f"⚠️ [Sentinel] Comando 'monitor' recibido pero ADK no soporta monitoreo continuo")
+        print(f"⚠️ [Sentinel] ADK no soporta monitoreo continuo. Usa Sentinel Core para file watching.")
+
+        # Reportar al Cerebro que no está soportado
+        await report_to_cerebro(
+            "sentinel_monitor_not_supported",
+            "warning",
+            {
+                "action": "monitor",
+                "target": target,
+                "message": "El modo ADK no soporta monitoreo continuo de archivos. Usa modo 'core' para file watching.",
+                "recommendation": "Cambia SENTINEL_MODE=core en la configuración para habilitar monitoreo de archivos",
+            }
+        )
+
+        return {
+            "request_id": request_id,
+            "status": "rejected",
+            "result": None,
+            "error": "El modo ADK no soporta monitoreo continuo de archivos. Usa SENTINEL_MODE=core",
+        }
 
     # ── 3. Acciones Pro ─────────────────────────────────────────────
     executor = ACTION_MAP.get(actual_action)
@@ -133,11 +194,11 @@ async def handle_command(
     # ── 4. Ejecutar en Core Rust ──────────────────────────────────────
     try:
         # Las funciones de ACTION_MAP aceptan target como arg posicional si corresponde
-        if actual_action in ("clean-cache", "metrics"):
-            raw_result, memory_id = await executor()
-        elif actual_action in ("fix",):
+        if actual_action in ("fix",):
+            # Solo fix recibe options para auto mode
             raw_result, memory_id = await executor(target or ".", options)
         else:
+            # Todas las demás acciones reciben target
             raw_result, memory_id = await executor(target or ".")
     except Exception as exc:
         error_msg = f"Error ejecutando '{actual_action}': {exc}"
@@ -221,7 +282,14 @@ async def handle_command(
     if isinstance(res_data, dict) and "files" in res_data and len(res_data["files"]) > 0:
         affected_file = res_data["files"][0].get("path")
 
-    # ── 9. Reportar a Cerebro ─────────────────────────────────────────
+    # ── 9. Extraer tarea única del análisis ─────────────────────────
+    # Si el LLM devolvió múltiples hallazgos, seleccionamos solo uno para Cerebro
+    task_selection = _extract_single_task(analysis, issues_count)
+    logger.info(f"🎯 [Sentinel] Tarea seleccionada: {task_selection['task_type']} (priority: {task_selection['priority']}) - {task_selection['selection_reason']}")
+    print(f"🎯 [Sentinel] Tarea seleccionada: {task_selection['task_type']} ({task_selection['priority']})")
+
+    # ── 10. Reportar a Cerebro ─────────────────────────────────────────
+    # Construir payload estructurado con UNA SOLA TAREA accionable
     await report_to_cerebro(
         event_type=f"sentinel_{actual_action.replace('-', '_')}_completed",
         severity=severity,
@@ -232,14 +300,20 @@ async def handle_command(
             "memory_id": memory_id,
             "raw_status": raw_result.get("status"),
             # Campos estandarizados para Cerebro Proactivo
-            "finding": finding_desc,
-            "recommendation": analysis[:2000] if analysis else "Revisar hallazgos de calidad detectados",
-            "file": affected_file or target,
-            "issues_count": issues_count,  # ✅ Ya correcto
+            "finding": task_selection["selected_task"],  # 🔥 Una sola tarea específica
+            "recommendation": task_selection["selected_task"][:500],  # Tarea prioritaria
+            "file": task_selection["file_hint"] or affected_file or target,
+            "issues_count": 1,  # 🔥 Reportamos 1 tarea a la vez
+            # Nuevos campos para trazabilidad de selección
+            "task_type": task_selection["task_type"],
+            "task_priority": task_selection["priority"],
+            "original_findings_count": task_selection["original_findings_count"],
+            "selection_reason": task_selection["selection_reason"],
+            "full_analysis": analysis[:2000] if len(analysis) > 2000 else analysis,  # Resumen completo truncado
         },
     )
 
-    # ── 10. Retornar CommandAck completo ───────────────────────────────
+    # ── 11. Retornar CommandAck completo ───────────────────────────────
     return {
         "request_id": request_id,
         "status": "completed",
@@ -250,12 +324,13 @@ async def handle_command(
             "analysis": analysis,       # Síntesis del LLM (para Telegram/Dashboard)
             "memory_id": memory_id,
             "severity": severity,
+            "selected_task": task_selection,  # Información de la tarea seleccionada
         },
         "error": None,
     }
 
 
-async def _handle_monitor_command(monitor_action: str, target: Optional[str], request_id: Optional[str]) -> dict:
+async def _handle_monitor_command(monitor_action: str, target: Optional[str], request_id: Optional[str], options: Optional[dict] = None) -> dict:
     """Maneja comandos de monitoreo."""
     executor = ACTION_MAP.get(monitor_action)
     if not executor:
@@ -267,7 +342,8 @@ async def _handle_monitor_command(monitor_action: str, target: Optional[str], re
         }
 
     try:
-        raw_result, memory_id = await executor(target or ".")
+        # Pasar options al executor (las funciones ahora aceptan options como segundo parámetro opcional)
+        raw_result, memory_id = await executor(target or ".", options)
     except Exception as exc:
         error_msg = f"Error ejecutando monitor/{monitor_action}: {exc}"
         print(f"❌ {error_msg}")
@@ -323,3 +399,122 @@ def _infer_severity(action: str, raw_result: dict, analysis: str) -> str:
     if action in ("audit", "fix"):
         return "warning"
     return "info"
+
+
+def _extract_single_task(analysis: str, issues_count: int = 0) -> dict:
+    """
+    Extrae una única tarea priorizada del análisis del LLM.
+
+    Cuando el LLM devuelve múltiples hallazgos (ej: "1. dry, 2. vulnerabilidad, 3. sql injection"),
+    esta función selecciona la más prioritaria y devuelve una estructura estructurada.
+
+    Retorna:
+        {
+            "selected_task": str,      # Descripción de la tarea seleccionada
+            "task_type": str,          # Tipo de tarea: security|performance|maintainability|style|refactor
+            "priority": str,           # critical|high|medium|low
+            "file_hint": str | None,   # Archivo mencionado si se detecta
+            "original_findings_count": int,  # Cuántos hallazgos había originalmente
+            "selection_reason": str,   # Por qué se seleccionó esta tarea
+        }
+    """
+    import re
+
+    analysis_lower = analysis.lower()
+
+    # Patrones para detectar tareas numeradas (1., 2), -, *, etc.)
+    numbered_patterns = [
+        r'(?:^|\n)\s*(?:\d+[.):\-]|\-|\*)\s*([^\n]+)',  # 1. texto, - texto, * texto
+        r'(?:^|\n)\s*(?:hallazgo|issue|problema|mejora|sugerencia)\s*(?:\d+)?[.:\-]?\s*([^\n]+)',
+    ]
+
+    found_tasks = []
+
+    for pattern in numbered_patterns:
+        matches = re.findall(pattern, analysis, re.IGNORECASE | re.MULTILINE)
+        for match in matches:
+            task_text = match.strip()
+            if len(task_text) > 10:  # Filtrar líneas muy cortas
+                found_tasks.append(task_text)
+
+    # Si no hay tareas numeradas, intentar dividir por párrafos que describan problemas
+    if not found_tasks:
+        paragraphs = [p.strip() for p in analysis.split('\n\n') if len(p.strip()) > 20]
+        for para in paragraphs:
+            # Detectar si el párrafo describe un problema
+            problem_indicators = ['error', 'issue', 'bug', 'problema', 'vulnerabilidad', 'mejorar', 'refactor', 'optimizar', 'dead code', 'unused']
+            if any(ind in para.lower() for ind in problem_indicators):
+                found_tasks.append(para[:200])  # Primeros 200 chars
+
+    # Determinar prioridad de cada tarea
+    def get_task_priority(task: str) -> int:
+        """Retorna score de prioridad (mayor = más prioritario)"""
+        task_lower = task.lower()
+        score = 0
+
+        # Palabras clave de severidad
+        critical_keywords = ['sql injection', 'injection', 'vulnerabilidad crítica', 'critical', 'seguridad crítica', 'exposición', 'password', 'credential']
+        high_keywords = ['vulnerabilidad', 'security', 'seguridad', 'memory leak', 'race condition', 'dead code']
+        medium_keywords = ['refactor', 'dry', 'solid', 'complejidad', 'duplicado', 'unused import']
+
+        if any(k in task_lower for k in critical_keywords):
+            score += 100
+        if any(k in task_lower for k in high_keywords):
+            score += 50
+        if any(k in task_lower for k in medium_keywords):
+            score += 20
+
+        return score
+
+    # Ordenar por prioridad
+    found_tasks.sort(key=get_task_priority, reverse=True)
+
+    # Seleccionar la primera (más prioritaria) o crear una genérica si no hay
+    if found_tasks:
+        selected = found_tasks[0]
+        original_count = len(found_tasks)
+
+        # Determinar tipo de tarea
+        selected_lower = selected.lower()
+        if any(k in selected_lower for k in ['sql injection', 'vulnerabilidad', 'security', 'seguridad', 'injection', 'exposición']):
+            task_type = "security"
+            priority = "critical" if any(k in selected_lower for k in ['injection', 'crítica', 'exposición']) else "high"
+        elif any(k in selected_lower for k in ['dead code', 'unused', 'duplicado', 'dry', 'solid', 'refactor']):
+            task_type = "maintainability"
+            priority = "medium"
+        elif any(k in selected_lower for k in ['complejidad', 'performance', 'optimizar', 'lento']):
+            task_type = "performance"
+            priority = "medium"
+        else:
+            task_type = "refactor"
+            priority = "low"
+
+        selection_reason = f"Tarea más prioritaria de {original_count} hallazgos detectados"
+    else:
+        # No se detectaron tareas específicas, usar el análisis completo
+        selected = analysis[:300] if len(analysis) > 300 else analysis
+        task_type = "refactor"
+        priority = "medium"
+        original_count = max(issues_count, 1)
+        selection_reason = "No se detectaron tareas específicas, usando resumen general"
+
+    # Intentar extraer referencia a archivo
+    file_hint = None
+    file_patterns = [
+        r'(?:en|in|archivo|file)\s+[`\']?([^\s\'`]+\.(?:py|js|ts|jsx|tsx|java|rs|go|cpp|c|h))[`\']?',
+        r'[`\']([^\'`]+\.(?:py|js|ts|jsx|tsx|java|rs|go|cpp|c|h))[`\']',
+    ]
+    for pattern in file_patterns:
+        match = re.search(pattern, analysis, re.IGNORECASE)
+        if match:
+            file_hint = match.group(1)
+            break
+
+    return {
+        "selected_task": selected,
+        "task_type": task_type,
+        "priority": priority,
+        "file_hint": file_hint,
+        "original_findings_count": original_count,
+        "selection_reason": selection_reason,
+    }

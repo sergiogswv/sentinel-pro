@@ -111,7 +111,12 @@ pub fn analizar_arquitectura(
         Arc::clone(&stats),
         project_path,
     )?;
-    let es_critico = respuesta.trim().to_uppercase().starts_with("CRITICO");
+    let clean_respuesta = respuesta.trim()
+        .trim_start_matches('*')
+        .trim_start_matches('#')
+        .trim_start_matches('-')
+        .trim();
+    let es_critico = clean_respuesta.to_uppercase().starts_with("CRITICO");
 
     // Actualizamos estadísticas en memoria
     {
