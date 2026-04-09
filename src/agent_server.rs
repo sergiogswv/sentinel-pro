@@ -165,12 +165,32 @@ async fn http_handle_command(
         "analyze" | "check" | "audit" | "review" => {
             let target = cmd.target.clone().unwrap_or_else(|| ".".to_string());
 
-            // Construir AgentContext
-            let project_root = if target == "." {
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            // --- Detectar la raíz del proyecto correctamente ---
+            // Si el target es un archivo, debemos buscar el .sentinelrc.toml caminando hacia arriba
+            let target_path = std::path::PathBuf::from(&target);
+            let project_root = if target_path.exists() {
+                if target_path.is_dir() {
+                    target_path
+                } else {
+                    target_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf()
+                }
             } else {
-                std::path::PathBuf::from(&target)
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
             };
+
+            // Buscar la raíz real caminando hacia arriba buscando el .sentinelrc.toml
+            let mut current = project_root.clone();
+            let mut final_root = project_root.clone();
+            loop {
+                if current.join(".sentinelrc.toml").exists() {
+                    final_root = current;
+                    break;
+                }
+                if !current.pop() {
+                    break;
+                }
+            }
+            let project_root = final_root;
 
             let config_sentinel = crate::config::SentinelConfig::load(&project_root)
                 .unwrap_or_default();
