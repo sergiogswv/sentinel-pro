@@ -179,11 +179,10 @@ async def _analyze_with_gemini_open_source(prompt: str) -> str:
                     text_content = last_part.get("text", "")
 
             # Strip <thought> blocks from Gemma models (when thought is in text content)
-            # Gemma sometimes returns internal reasoning wrapped in <thought>...</thought> XML tags
             import re
             if text_content:
-                text_content = re.sub(r'<thought>.*?</thought>', '', text_content, flags=re.DOTALL)
-                text_content = text_content.strip()
+                from .llm_parser import UniversalLLMParser
+                text_content = UniversalLLMParser.strip_thinking_tags(text_content)
 
             return text_content
 
@@ -227,12 +226,8 @@ async def _analyze_with_openai(prompt: str) -> str:
         content = response.choices[0].message.content or ""
 
         # Strip <thought> blocks from Gemma models accessed via OpenAI-compatible endpoint
-        # Gemma returns internal reasoning wrapped in <thought>...</thought> XML tags
-        import re
-        # Remove <thought>...</thought> blocks (multiline, non-greedy)
-        content = re.sub(r'<thought>.*?</thought>', '', content, flags=re.DOTALL)
-        # Clean up any extra whitespace left behind
-        content = content.strip()
+        from .llm_parser import UniversalLLMParser
+        content = UniversalLLMParser.strip_thinking_tags(content)
 
         return content
     except ImportError:

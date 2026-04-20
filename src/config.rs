@@ -297,9 +297,10 @@ impl SentinelConfig {
         let content = fs::read_to_string(&config_path).ok()?;
 
         // Intentar deserializar directamente primero (configuración actual)
-        if let Ok(mut config) = toml::from_str::<SentinelConfig>(&content) {
-            // Validar y migrar si es necesario
-            if config.version != SENTINEL_VERSION {
+        match toml::from_str::<SentinelConfig>(&content) {
+            Ok(mut config) => {
+                // Validar y migrar si es necesario
+                if config.version != SENTINEL_VERSION {
                 println!(
                     "{}",
                     format!(
@@ -313,7 +314,11 @@ impl SentinelConfig {
                 let _ = config.save(path);
                 println!("{}", "   ✅ Configuración migrada exitosamente".green());
             }
-            return Some(config);
+                return Some(config);
+            }
+            Err(e) => {
+                eprintln!("[DEBUG-TOML] Parsing error: {}", e);
+            }
         }
 
         // Si falla, intentar cargar como configuración antigua (sin campo version)

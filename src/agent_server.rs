@@ -12,6 +12,7 @@ use std::collections::HashMap;
 
 pub async fn start_server(config: AgentConfig) -> anyhow::Result<()> {
     let app = Router::new()
+        .route("/health", axum::routing::get(http_health))
         .route("/command", post(http_handle_command));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
@@ -35,6 +36,14 @@ pub async fn start_server(config: AgentConfig) -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+async fn http_health() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "status": "ok",
+        "agent": "sentinel-core",
+        "version": crate::config::SENTINEL_VERSION
+    }))
 }
 
 async fn http_handle_command(

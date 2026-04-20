@@ -12,6 +12,49 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
+/// Resultado de cargar la config global de Cerebro
+struct CerebroGlobalLlm {
+    provider: String,  // "ollama", "gemini", "gemini-open-source", "anthropic", etc.
+    model: String,
+    base_url: String,
+    api_key: String,
+}
+
+/// Carga la configuración global de LLM desde ~/.cerebro/global.config.json
+/// Retorna None si el archivo no existe o no tiene sección llm válida.
+fn cargar_config_global_cerebro() -> Option<CerebroGlobalLlm> {
+    let home = dirs::home_dir()?;
+    let config_path = home.join(".cerebro").join("global.config.json");
+
+    if !config_path.exists() {
+        return None;
+    }
+
+    let content = fs::read_to_string(&config_path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+
+    let llm = json.get("global_config")?.get("llm")?;
+
+    let provider = llm.get("provider")?.as_str()?.to_string();
+    let model = llm
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let base_url = llm
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let api_key = llm
+        .get("api_key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    Some(CerebroGlobalLlm { provider, model, base_url, api_key })
+}
+
 /// Muestra el banner ASCII art de Sentinel al inicio del programa
 pub fn mostrar_banner() {
     println!();
@@ -219,6 +262,7 @@ pub fn mostrar_ayuda(config: Option<&SentinelConfig>) {
 }
 
 pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
+    let is_terminal = dialoguer::console::Term::stdout().is_term();
     let gestor = SentinelConfig::detectar_gestor(project_path);
     let nombre = project_path
         .file_name()
@@ -256,6 +300,36 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
             "🤖 Configuración de Modelos AI".bright_magenta().bold()
         );
 
+        // ── Intentar cargar config global de Cerebro como valores por defecto ──
+        let global_llm = cargar_config_global_cerebro();
+        if global_llm.is_some() {
+            println!(
+                "   {} Configuración global de Cerebro detectada. Usando como valores por defecto.",
+                "ℹ️".cyan()
+            );
+        }
+
+        // Mapeo de provider de Cerebro al índice del menú de Sentinel
+        // (gemini-open-source se trata como gemini en el wizard)
+        let global_provider_str = global_llm.as_ref().map(|g| {
+            match g.provider.as_str() {
+                "gemini-open-source" => "gemini",
+                "claude"             => "anthropic",
+                other                => other,
+            }.to_string()
+        });
+
+        let default_provider_index = match global_provider_str.as_deref() {
+            Some("anthropic") => 0,
+            Some("gemini")    => 1,
+            Some("openai")    => 2,
+            Some("groq")      => 3,
+            Some("ollama")    => 4,
+            Some("kimi")      => 5,
+            Some("deepseek")  => 6,
+            _                 => 0,
+        };
+
         // 1. Seleccionar Proveedor
         let providers = vec![
             "Claude (Anthropic)",
@@ -269,9 +343,9 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
         let selection = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
             .with_prompt("Selecciona un proveedor de IA principal")
             .items(&providers)
-            .default(0)
+            .default(default_provider_index)
             .interact()
-            .unwrap_or(0);
+            .unwrap_or(default_provider_index);
 
         let provider_str = match selection {
             0 => "anthropic",
@@ -286,94 +360,139 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
 
         config.primary_model.provider = provider_str.to_string();
 
-        let default_url = match provider_str {
+        // URL por defecto: Cerebro global > env var > hardcoded default
+        let default_url_hardcoded = match provider_str {
             "anthropic" => "https://api.anthropic.com".to_string(),
-            "gemini" => "https://generativelanguage.googleapis.com".to_string(),
-            "openai" => "https://api.openai.com/v1".to_string(),
-            "groq" => "https://api.groq.com/openai/v1".to_string(),
-            "ollama" => "http://localhost:11434".to_string(),
-            "kimi" => "https://api.moonshot.ai/v1".to_string(),
-            "deepseek" => "https://api.deepseek.com".to_string(),
-            _ => "".to_string(),
+            "gemini"    => "https://generativelanguage.googleapis.com".to_string(),
+            "openai"    => "https://api.openai.com/v1".to_string(),
+            "groq"      => "https://api.groq.com/openai/v1".to_string(),
+            "ollama"    => "http://localhost:11434".to_string(),
+            "kimi"      => "https://api.moonshot.ai/v1".to_string(),
+            "deepseek"  => "https://api.deepseek.com".to_string(),
+            _           => "".to_string(),
         };
 
         let env_url = std::env::var(format!("{}_BASE_URL", provider_str.to_uppercase())).ok();
         let env_key = std::env::var(format!("{}_API_KEY", provider_str.to_uppercase())).ok();
 
-        config.primary_model.url =
-            dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                .with_prompt(format!("URL de la API para {}", provider_str))
-                .default(env_url.unwrap_or(default_url))
-                .interact_text()
-                .unwrap_or_default();
+        // Pre-poblar URL: global Cerebro tiene prioridad si el provider coincide
+        let prefilled_url = global_llm
+            .as_ref()
+            .filter(|_g| global_provider_str.as_deref() == Some(provider_str))
+            .map(|g| g.base_url.clone())
+            .filter(|u| !u.is_empty())
+            .or(env_url)
+            .unwrap_or(default_url_hardcoded);
 
-        let api_key_prompt = if provider_str == "ollama" {
-            "API Key (opcional para Ollama)"
-        } else {
-            "API Key"
-        };
+        // Pre-poblar API key: global Cerebro tiene prioridad si el provider coincide
+        let prefilled_key = global_llm
+            .as_ref()
+            .filter(|_g| global_provider_str.as_deref() == Some(provider_str))
+            .map(|g| g.api_key.clone())
+            .filter(|k| !k.is_empty())
+            .or(env_key)
+            .unwrap_or_default();
 
-        config.primary_model.api_key =
-            dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                .with_prompt(format!("{} para {}", api_key_prompt, provider_str))
-                .allow_empty(provider_str == "ollama")
-                .default(env_key.unwrap_or_else(|| String::new()))
-                .interact_text()
-                .unwrap_or_default();
-
-        let default_model = match provider_str {
+        // Modelo por defecto del provider seleccionado
+        let default_model_hardcoded = match provider_str {
             "anthropic" => "claude-3-5-sonnet-20241022".to_string(),
-            "gemini" => "gemini-2.0-flash".to_string(),
-            "openai" => "gpt-4o".to_string(),
-            "groq" => "llama3-70b-8192".to_string(),
-            "ollama" => "llama3".to_string(),
-            "kimi" => "moonshot-v1-8k".to_string(),
-            "deepseek" => "deepseek-coder".to_string(),
-            _ => "".to_string(),
+            "gemini"    => "gemini-2.0-flash".to_string(),
+            "openai"    => "gpt-4o".to_string(),
+            "groq"      => "llama3-70b-8192".to_string(),
+            "ollama"    => "qwen3:8b".to_string(),
+            "kimi"      => "moonshot-v1-8k".to_string(),
+            "deepseek"  => "deepseek-coder".to_string(),
+            _           => "".to_string(),
         };
 
-        // 2. Intentar obtener modelos disponibles dinámicamente
-        println!("🔍 Conectando con {} para obtener modelos...", provider_str);
-        match ai::obtener_modelos_disponibles(
-            &provider_str,
-            &config.primary_model.url,
-            &config.primary_model.api_key,
-        ) {
-            Ok(mut models) if !models.is_empty() => {
-                models.sort();
-                let selection =
-                    dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                        .with_prompt(format!("Selecciona el modelo para {}", provider_str))
-                        .items(&models)
-                        .default(0)
-                        .interact()
-                        .unwrap_or(0);
+        // Pre-poblar modelo: global Cerebro si el provider coincide, si no el default hardcoded
+        let prefilled_model = global_llm
+            .as_ref()
+            .filter(|_g| global_provider_str.as_deref() == Some(provider_str))
+            .map(|g| g.model.clone())
+            .filter(|m| !m.is_empty())
+            .unwrap_or(default_model_hardcoded.clone());
 
-                if selection < models.len() {
-                    config.primary_model.name = models[selection].clone();
-                } else {
-                    config.primary_model.name = default_model;
+        // Si es entorno no interactivo (ej. ejecutado por Cerebro) y tenemos la URL, asignarla directo
+
+        if !is_terminal {
+            config.primary_model.url = prefilled_url.clone();
+            config.primary_model.api_key = prefilled_key.clone();
+            config.primary_model.name = prefilled_model.clone();
+        } else {
+            config.primary_model.url =
+                dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                    .with_prompt(format!("URL de la API para {}", provider_str))
+                    .default(prefilled_url.clone())
+                    .interact_text()
+                    .unwrap_or(prefilled_url);
+
+            let api_key_prompt = if provider_str == "ollama" {
+                "API Key (opcional para Ollama)"
+            } else {
+                "API Key"
+            };
+
+            config.primary_model.api_key =
+                dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                    .with_prompt(format!("{} para {}", api_key_prompt, provider_str))
+                    .allow_empty(provider_str == "ollama")
+                    .default(prefilled_key.clone())
+                    .interact_text()
+                    .unwrap_or(prefilled_key);
+        }
+
+        if !is_terminal {
+            // Ya pre-asignamos arriba
+        } else {
+            // 2. Intentar obtener modelos disponibles dinámicamente
+            println!("🔍 Conectando con {} para obtener modelos...", provider_str);
+            match ai::obtener_modelos_disponibles(
+                &provider_str,
+                &config.primary_model.url,
+                &config.primary_model.api_key,
+            ) {
+                Ok(mut models) if !models.is_empty() => {
+                    models.sort();
+                    // Pre-seleccionar el modelo global si está en la lista
+                    let default_model_idx = models
+                        .iter()
+                        .position(|m| m == &prefilled_model)
+                        .unwrap_or(0);
+                    let selection =
+                        dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                            .with_prompt(format!("Selecciona el modelo para {}", provider_str))
+                            .items(&models)
+                            .default(default_model_idx)
+                            .interact()
+                            .unwrap_or(default_model_idx);
+
+                    if selection < models.len() {
+                        config.primary_model.name = models[selection].clone();
+                    } else {
+                        config.primary_model.name = prefilled_model;
+                    }
                 }
-            }
-            Err(e) => {
-                println!(
-                    "   ⚠️  No se pudieron obtener los modelos automáticamente: {}",
-                    e
-                );
-                config.primary_model.name =
-                    dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                        .with_prompt("Ingresa el nombre del modelo manualmente")
-                        .default(default_model)
-                        .interact_text()
-                        .unwrap_or_default();
-            }
-            _ => {
-                config.primary_model.name =
-                    dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                        .with_prompt("Ingresa el nombre del modelo manualmente")
-                        .default(default_model)
-                        .interact_text()
-                        .unwrap_or_default();
+                Err(e) => {
+                    println!(
+                        "   ⚠️  No se pudieron obtener los modelos automáticamente: {}",
+                        e
+                    );
+                    config.primary_model.name =
+                        dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                            .with_prompt("Ingresa el nombre del modelo manualmente")
+                            .default(prefilled_model.clone())
+                            .interact_text()
+                            .unwrap_or(prefilled_model);
+                }
+                _ => {
+                    config.primary_model.name =
+                        dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                            .with_prompt("Ingresa el nombre del modelo manualmente")
+                            .default(prefilled_model.clone())
+                            .interact_text()
+                            .unwrap_or(prefilled_model);
+                }
             }
         }
 
@@ -513,7 +632,11 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
                     ai::TestingStatus::Missing => "missing".to_string(),
                 });
 
-                ayudar_configurar_testing(&mut config, testing_info);
+                if is_terminal {
+                    ayudar_configurar_testing(&mut config, testing_info);
+                } else {
+                    println!("   ℹ️  Modo agente: Saltando configuración interactiva de testing.");
+                }
                 let _ = config.save(project_path);
             }
         } else {
@@ -549,11 +672,16 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
         );
     }
 
-    let confirms = dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
-        .with_prompt("¿Es correcto el framework detectado?")
-        .default(true)
-        .interact()
-        .unwrap_or(true);
+    let confirms = if is_terminal {
+        dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
+            .with_prompt("¿Es correcto el framework detectado?")
+            .default(true)
+            .interact()
+            .unwrap_or(true)
+    } else {
+        println!("   ℹ️  Modo agente: Auto-aceptando framework detectado.");
+        true
+    };
 
     if !confirms {
         println!("   ℹ️  Manteniendo configuración actual");
@@ -576,7 +704,12 @@ pub fn inicializar_sentinel(project_path: &Path) -> SentinelConfig {
             ai::TestingStatus::Incomplete => "incomplete".to_string(),
             ai::TestingStatus::Missing => "missing".to_string(),
         });
-        ayudar_configurar_testing(&mut config, testing_info);
+        
+        if is_terminal {
+            ayudar_configurar_testing(&mut config, testing_info);
+        } else {
+            println!("   ℹ️  Modo agente: Saltando configuración interactiva de testing.");
+        }
     } else {
         println!("   ℹ️  Continuando sin detección de testing");
     }

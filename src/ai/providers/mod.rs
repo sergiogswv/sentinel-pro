@@ -62,7 +62,7 @@ pub fn build_provider(config: &ModelConfig) -> Box<dyn AiProvider> {
     };
 
     match provider {
-        "gemini" => Box::new(GeminiProvider::new(&config.api_key, &config.url, false)),
+        "gemini" | "gemini-open-source" => Box::new(GeminiProvider::new(&config.api_key, &config.url, false)),
         // "interactions" es el alias para la Gemini Interactions API (distinta de Content API)
         "interactions" => Box::new(GeminiProvider::new(&config.api_key, &config.url, true)),
         "ollama" => Box::new(OllamaProvider::new(&config.url)),

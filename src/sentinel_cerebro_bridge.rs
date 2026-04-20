@@ -1,5 +1,6 @@
 use crate::agent_models::{CommandAck, OrchestratorCommand};
 use crate::agent_reporter::report_event;
+use crate::agent_config::AgentConfig;
 use crate::agents::base::{AgentContext, Task, TaskType};
 use crate::agents::orchestrator::AgentOrchestrator;
 /// sentinel_cerebro_bridge.rs — Puente entre Cerebro ↔ Sentinel Core ↔ LLM.
@@ -410,7 +411,7 @@ async fn audit_project(
 /// Revisión de arquitectura completa
 async fn review_architecture(
     target: &str,
-    _agent_context: &AgentContext,
+    agent_context: &AgentContext,
     _config: &AgentConfig,
     _auto_mode: bool,
 ) -> anyhow::Result<AnalysisResult> {
