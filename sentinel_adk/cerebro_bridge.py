@@ -113,6 +113,16 @@ async def handle_command(
     print(msg)
     logger.info(msg)
 
+    # ── 0. Lifecycle (open) ───────────────────────────────────────────
+    if actual_action == "open":
+        logger.info(f"🟢 [Sentinel ADK] Lifecycle 'open' received")
+        return {
+            "request_id": request_id,
+            "status": "completed",
+            "result": {"message": "Sentinel ADK listo y conectado"},
+            "error": None,
+        }
+
     # ── 1. Status — no requiere Core ni LLM ──────────────────────────
     if actual_action == "status":
         ctx = await memory.get_hot_files(5)

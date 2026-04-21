@@ -255,6 +255,9 @@ pub fn is_file_excluded(project_root: &Path, file_path: &Path) -> bool {
 }
 
 pub fn start_monitor(project: Option<String>, auto_mode: bool) {
+    // Resetear señal de stop para permitir reinicios (vía Agente)
+    STOP_SIGNAL.store(false, Ordering::SeqCst);
+    
     eprintln!("[DEBUG] start_monitor llamado con project: {:?}, auto_mode: {}", project, auto_mode);
 
     // Mostrar banner al inicio
