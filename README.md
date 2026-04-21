@@ -1,35 +1,21 @@
-# 🛡️ SENTINEL PRO
+# 🛡️ Sentinel — The Watcher Agent
 
-> **Autonomous Real-Time Security & Logic Auditor**
-
-SENTINEL is a high-performance monitoring agent written in **Rust**. It watches your project's filesystem for changes and provides immediate architectural audits, regression detection, and interactive AI feedback.
-
----
-
-## 🚀 Key Responsibilities
-
-- **Real-Time Monitoring:** Native filesystem watching with debouncing.
-- **Architectural Guard:** Validates code against structural rules in real-time.
-- **Business Logic Guard:** Detects potential regressions by comparing changes with Git history.
-- **Interactive Prompts:** Requests user confirmation via the SKRYMIR Dashboard before proceeding with deep audits.
+> **El Agente de Monitoreo y Detección de Skrymir Suite.**
+>
+> Desarrollado por: **Sergio Guadarrama** — [sergio.gs8925@gmail.com](mailto:sergio.gs8925@gmail.com)
 
 ---
 
-## ⚙️ Installation
+## 📋 Descripción
 
-```bash
-# 1. Clone
-git clone https://github.com/sergiogswv/sentinel-pro.git
-cd sentinel-pro
+Sentinel es el vigía de la suite. Su objetivo es observar cada cambio en el sistema de archivos y activar la cadena de análisis cuando detecta actividad sospechosa o inconsistente.
 
-# 2. Build (Requires Rust & Cargo)
-cargo build --release
-
-# 3. Run
-./target/release/sentinel serve
-```
+### Funcionalidades Clave:
+- **Continuous Monitoring:** Implementado en Rust para máxima eficiencia y bajo consumo de recursos.
+- **Semantic Analysis (ADK):** Capa opcional de IA que analiza el "por qué" y el "qué" de cada cambio detectado.
+- **Vulnerability Guard:** Detección inmediata de patrones de código inseguros o erróneos.
+- **Direct Feedback:** Reporta directamente a Cerebro para disparar el flujo del tribunal.
 
 ---
-
-## 📜 License
-© 2026 Sergio - SKRYMIR Intelligence Command.
+**Sergio Guadarrama** — [sergio.gs8925@gmail.com](mailto:sergio.gs8925@gmail.com)
+Parte de la **Skrymir Suite**

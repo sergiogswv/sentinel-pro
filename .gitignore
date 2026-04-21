@@ -12,6 +12,8 @@ errors.txt
 __pycache__/
 *.py[cod]
 *.class
+# Databases
+*.db
 
 # Environment variables
 .env
